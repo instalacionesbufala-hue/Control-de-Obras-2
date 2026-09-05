@@ -20,9 +20,11 @@ interface CatalogViewProps {
   onUpdateCategory: (id: string, updatedData: Partial<CatalogCategory>) => void;
   onDeleteCategory: (id: string) => void;
   onResetToDefaults: () => void;
+  embebido?: boolean; // dentro de "Materiales y kits": la cabecera la pone el contenedor
 }
 
 export const CatalogView: React.FC<CatalogViewProps> = ({
+  embebido = false,
   categories,
   items,
   onAddItem,
@@ -330,12 +332,12 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
   const totalCostInventory = items.reduce((acc, it) => acc + (it.costeInternoTotal || it.precioUnitario * 0.6), 0);
 
   return (
-    <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto">
+    <div className={embebido ? "space-y-6" : "p-6 md:p-8 space-y-6 max-w-7xl mx-auto"}>
       {/* ======================================================== */}
       {/* HEADER WITH ACTIONS */}
       {/* ======================================================== */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
+        <div className={embebido ? "hidden" : undefined}>
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-black uppercase tracking-wider text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md">
               Base de Datos Técnica & Escandallos de Obras

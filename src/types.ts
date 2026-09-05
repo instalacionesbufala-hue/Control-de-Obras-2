@@ -435,6 +435,14 @@ export interface CompanySettings {
   diasVencimientoFactura: number;
   tecnicos: string[];
   franjas: { manana: { inicio: string; fin: string }; tarde: { inicio: string; fin: string } };
+  // Qué franjas ofrece la empresa (se puede quitar la tarde o la mañana para todos)
+  franjasActivas?: { manana: boolean; tarde: boolean };
+  // Qué franjas cubre cada técnico, por nombre. Si falta, cubre las dos.
+  disponibilidadTecnicos?: Record<string, { manana: boolean; tarde: boolean }>;
+  // Lector de tickets con IA: clave de Gemini del propio usuario (se sincroniza por su nube; nunca va en las copias exportadas)
+  geminiApiKey?: string;
+  // Aviso de aceptación por correo con Google Apps Script (URL /exec de la aplicación web del usuario)
+  avisoScriptUrl?: string;
   verifactuCertificado: {
     instalado: boolean;
     nombreTitular: string;

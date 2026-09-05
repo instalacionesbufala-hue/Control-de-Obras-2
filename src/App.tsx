@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import {
   LayoutDashboard, FileCheck2, BadgeEuro, Receipt, Users, Wallet,
   BarChart3, Settings, Zap, Boxes, Menu, X, Trash2, Sparkles,
-  CheckCircle2, AlertTriangle, CalendarDays, User as UserIcon, Cloud, RefreshCw, TrendingUp, PackagePlus, HelpCircle, CloudOff, Save,
+  CheckCircle2, AlertTriangle, CalendarDays, User as UserIcon, Cloud, RefreshCw, TrendingUp, PackagePlus, HelpCircle, CloudOff, Save, FileText, HardHat,
 } from 'lucide-react';
 
 import {
@@ -25,7 +25,7 @@ import { hoyISO, ahoraISO } from './utils/dates';
 import { DashboardView } from './components/DashboardView';
 import { ProjectsView } from './components/ProjectsView';
 import { CatalogView } from './components/CatalogView';
-import { KitsView } from './components/KitsView';
+import { MaterialsAndKitsView } from './components/MaterialsAndKitsView';
 import { SalesView } from './components/SalesView';
 import { ExpensesView } from './components/ExpensesView';
 import { ReconciliationView } from './components/ReconciliationView';
@@ -40,7 +40,7 @@ import { ClientAcceptancePortal } from './components/ClientAcceptancePortal';
 import { PublicAcceptancePage } from './components/PublicAcceptancePage';
 
 const TAB_TITULOS: Record<string, string> = {
-  dashboard: 'Resumen', obras: 'Presupuestos y obras', agenda: 'Agenda', catalogo: 'Materiales y conceptos', kits: 'Kits',
+  dashboard: 'Resumen', presupuestos: 'Presupuestos', obras: 'Obras', agenda: 'Agenda', catalogo: 'Materiales y kits', kits: 'Materiales y kits',
   ventas: 'Facturas', gastos: 'Gastos y compras', bancos: 'Banco y conciliación', contactos: 'Clientes', rentabilidad: 'Rentabilidad',
   gestoria: 'Trimestre e impuestos', ajustes: 'Configuración',
 };
@@ -64,7 +64,8 @@ function AppPrincipal() {
   const [showGlobalAIAssistant, setShowGlobalAIAssistant] = useState(false);
   const [showDeleteDemoModal, setShowDeleteDemoModal] = useState(false);
   const [portalProjectId, setPortalProjectId] = useState<string | null>(null);
-  const [aviso, setAviso] = useState<{ texto: string; tipo: 'ok' | 'error' | 'info' } | null>(null);
+  const [aviso, setAviso] = useState<{ texto: string; tipo: 'ok' | 'error' | 'info'; accion?: { texto: string; onClick: () => void }; fijo?: boolean } | null>(null);
+  const [citaPendienteDe, setCitaPendienteDe] = useState<string | null>(null); // abre "Proponer franjas" en Obras
 
   // ---------- Estado principal (se carga de localStorage o de los ejemplos) ----------
   const inicial = useMemo<AppState>(() => {
@@ -239,9 +240,9 @@ function AppPrincipal() {
 
   // Avisos temporales
   useEffect(() => {
-    if (!aviso) return;
-    const t = setTimeout(() => setAviso(null), 5000);
-    return () => clearTimeout(t);
+    if (!aviso || aviso.fijo) return;
+    const id = setTimeout(() => setAviso(null), 5000);
+    return () => clearTimeout(id);
   }, [aviso]);
 
   // Portal de aceptación local (misma sesión): ?aceptarPresupuesto=ID
@@ -421,6 +422,26 @@ function AppPrincipal() {
     setAviso({ texto: `Presupuesto ${project.codigo} aceptado. Obra ${obraCodigo} creada.`, tipo: 'ok' });
   };
 
+  // Aviso sonoro, del navegador y en pantalla cuando el cliente acepta desde su móvil
+  const avisarAceptacion = (p: Project, a: AceptacionPublica) => {
+    const texto = `${a.firmadoPor} ha aceptado el presupuesto ${p.codigo} (${p.nombre})${a.huecoElegido ? `. Prefiere el ${a.huecoElegido.fecha} por la ${a.huecoElegido.franja === 'manana' ? 'mañana' : 'tarde'}` : ''}.`;
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      [0, 0.18].forEach((t, i) => { const o = ctx.createOscillator(); const g = ctx.createGain(); o.connect(g); g.connect(ctx.destination); o.frequency.value = i ? 1046 : 784; g.gain.setValueAtTime(0.0001, ctx.currentTime + t); g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + 0.16); o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.18); });
+    } catch {
+      // sin audio
+    }
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        const n = new Notification('Presupuesto aceptado', { body: texto, tag: `acept-${p.id}` });
+        n.onclick = () => { window.focus(); setSelectedProjectId(p.id); setActiveTab('obras'); setCitaPendienteDe(p.id); n.close(); };
+      }
+    } catch {
+      // sin notificaciones
+    }
+    setAviso({ texto, tipo: 'ok', fijo: true, accion: { texto: 'Proponer franjas al cliente', onClick: () => { setSelectedProjectId(p.id); setActiveTab('obras'); setCitaPendienteDe(p.id); setAviso(null); } } });
+  };
+
   // Escucha de aceptaciones públicas de presupuestos enviados con enlace
   const tokensEscuchados = useRef<Record<string, () => void>>({});
   useEffect(() => {
@@ -431,6 +452,7 @@ function AppPrincipal() {
       if (tokensEscuchados.current[token]) return;
       tokensEscuchados.current[token] = escucharAceptaciones(token, (a: AceptacionPublica) => {
         handleAcceptBudgetAndConvertToObra(p.id, firmaDesdeAceptacion(a), a.huecoElegido);
+        avisarAceptacion(p, a);
         if (a.notasCliente) handleUpdateProject(p.id, { solicitudCitaCliente: { fechaSugerida: a.huecoElegido?.fecha || '', franjaHoraria: a.huecoElegido ? (a.huecoElegido.franja === 'manana' ? 'Mañana' : 'Tarde') : '', horaInicio: a.huecoElegido?.horaInicio, horaFin: a.huecoElegido?.horaFin, estado: 'Pendiente confirmación', notasCliente: a.notasCliente, fechaSolicitud: ahoraISO() } });
       });
     });
@@ -474,11 +496,6 @@ function AppPrincipal() {
   };
   const handleUpdateInvoiceStatus = (invoiceId: string, estado: Invoice['estado']) => setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? { ...i, estado } : i)));
   const handleUpdateInvoice = (invoiceId: string, campos: Partial<Invoice>) => setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? { ...i, ...campos } : i)));
-  const handleDeleteInvoice = (invoiceId: string) => {
-    const inv = invoices.find((i) => i.id === invoiceId);
-    setInvoices((prev) => prev.filter((i) => i.id !== invoiceId));
-    if (inv?.obraId) setProjects((prev) => prev.map((p) => (p.id === inv.obraId ? { ...p, totalFacturado: Math.max(0, p.totalFacturado - inv.baseImponible), facturaIds: (p.facturaIds || []).filter((x) => x !== invoiceId) } : p)));
-  };
 
   // ---------- Gastos ----------
   const categoriaDesglose = (cat: Expense['categoria']): keyof Project['desgloseGastos'] =>
@@ -645,6 +662,7 @@ function AppPrincipal() {
   const unreconciledTxCount = bankTransactions.filter((t) => !t.conciliado).length;
   const citasPendientes = projects.filter((p) => p.estado === 'Aceptado' && !p.fechaCitaCalendario).length + calendarEvents.filter((e) => e.estado === 'Pendiente confirmación').length;
   const obrasActivas = projects.filter((p) => p.estado === 'En ejecución' || p.estado === 'Aceptado').length;
+  const presupuestosVivos = projects.filter((p) => p.estado === 'Borrador' || p.estado === 'Enviado').length;
 
   const nombreApp = companySettings.nombreComercial || companySettings.razonSocial;
 
@@ -676,11 +694,11 @@ function AppPrincipal() {
             <p className="px-4 text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Gestión</p>
             <div className="space-y-1">
               <NavItem id="dashboard" icon={LayoutDashboard} label="Resumen" active={activeTab} onClick={irA} />
-              <NavItem id="obras" icon={FileCheck2} label="Presupuestos y obras" badge={obrasActivas ? `${obrasActivas} activas` : undefined} badgeColor="bg-blue-500/20 text-blue-300" active={activeTab} onClick={irA} />
               <NavItem id="agenda" icon={CalendarDays} label="Agenda" badge={citasPendientes ? `${citasPendientes}` : undefined} badgeColor="bg-amber-500/20 text-amber-300" active={activeTab} onClick={irA} />
+              <NavItem id="presupuestos" icon={FileText} label="Presupuestos" badge={presupuestosVivos ? `${presupuestosVivos}` : undefined} badgeColor="bg-blue-500/20 text-blue-300" active={activeTab} onClick={irA} />
+              <NavItem id="obras" icon={HardHat} label="Obras" badge={obrasActivas ? `${obrasActivas} activas` : undefined} badgeColor="bg-amber-500/20 text-amber-300" active={activeTab} onClick={irA} />
               <NavItem id="contactos" icon={Users} label="Clientes" badge={`${clients.length}`} badgeColor="bg-slate-700 text-slate-300" active={activeTab} onClick={irA} />
-              <NavItem id="catalogo" icon={Boxes} label="Materiales y conceptos" badge={`${catalogItems.length}`} badgeColor="bg-slate-700 text-slate-300" active={activeTab} onClick={irA} />
-              <NavItem id="kits" icon={PackagePlus} label="Kits" badge={`${kits.length}`} badgeColor="bg-slate-700 text-slate-300" active={activeTab} onClick={irA} />
+              <NavItem id="catalogo" icon={Boxes} label="Materiales y kits" badge={`${catalogItems.length} + ${kits.length}`} badgeColor="bg-slate-700 text-slate-300" active={activeTab} onClick={irA} />
             </div>
           </div>
           <div>
@@ -784,7 +802,9 @@ function AppPrincipal() {
 
         {aviso && (
           <div className={`mx-4 lg:mx-8 mt-3 p-3 rounded-2xl border text-xs font-bold flex items-center gap-2 ${aviso.tipo === 'ok' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : aviso.tipo === 'error' ? 'bg-rose-50 border-rose-200 text-rose-800' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
-            <CheckCircle2 size={15} /> {aviso.texto}
+            <CheckCircle2 size={15} className="shrink-0" /> <span className="flex-1">{aviso.texto}</span>
+            {aviso.accion && <button onClick={aviso.accion.onClick} className="px-3 py-1.5 bg-slate-900 text-white rounded-xl font-black text-[11px] cursor-pointer shrink-0 flex items-center gap-1"><CalendarDays size={12} /> {aviso.accion.texto}</button>}
+            {aviso.fijo && <button onClick={() => setAviso(null)} className="text-slate-500 hover:text-slate-900 cursor-pointer shrink-0" title="Cerrar"><X size={14} /></button>}
           </div>
         )}
 
@@ -795,9 +815,9 @@ function AppPrincipal() {
               onOpenNewInvoice={() => { setPreselectedProjectForInvoice(null); setShowNewInvoiceModal(true); setActiveTab('ventas'); }}
               onOpenNewExpense={() => { setPreselectedProjectForInvoice(null); setShowNewExpenseModal(true); setActiveTab('gastos'); }} />
           )}
-          {activeTab === 'obras' && (
+          {(activeTab === 'obras' || activeTab === 'presupuestos') && (
             <ProjectsView projects={projects} clients={clients} selectedProjectId={selectedProjectId} companySettings={companySettings} catalogCategories={catalogCategories} catalogItems={catalogItems} kits={kits} calendarEvents={calendarEvents} invoices={invoices}
-              firebaseUid={firebaseUser?.uid || null} siguienteCodigo={siguienteCodigoPresupuesto()}
+              firebaseUid={firebaseUser?.uid || null} siguienteCodigo={siguienteCodigoPresupuesto()} modo={activeTab === 'presupuestos' ? 'presupuestos' : 'obras'} abrirCitaDe={citaPendienteDe} onCitaAbierta={() => setCitaPendienteDe(null)}
               onSelectProject={setSelectedProjectId} onCreateProject={handleCreateProject} onUpdateProject={handleUpdateProject} onUpdateProjectStatus={handleUpdateProjectStatus} onUpdateClient={handleUpdateClient}
               onAcceptBudgetAndConvertToObra={handleAcceptBudgetAndConvertToObra} onConfirmarCita={handleConfirmarCita} onDeleteProject={handleDeleteProject} onAddCalendarEvent={handleAddCalendarEvent} onUpdateCalendarEvent={handleUpdateCalendarEvent}
               onAddLog={handleAddProjectLog} onAddDocument={handleAddProjectDocument} onAddPhoto={handleAddProjectPhoto} onOpenNewInvoiceForProject={handleOpenNewInvoiceForProject} onOpenNewExpenseForProject={handleOpenNewExpenseForProject} onAviso={(t, tipo) => setAviso({ texto: t, tipo: tipo || 'info' })} />
@@ -806,15 +826,15 @@ function AppPrincipal() {
             <CalendarAgendaView calendarEvents={calendarEvents} projects={projects} clients={clients} companySettings={companySettings}
               onAddCalendarEvent={handleAddCalendarEvent} onUpdateCalendarEvent={handleUpdateCalendarEvent} onDeleteCalendarEvent={handleDeleteCalendarEvent} onConfirmarCita={handleConfirmarCita} onSelectProject={handleSelectProject} onAviso={(t, tipo) => setAviso({ texto: t, tipo: tipo || 'info' })} />
           )}
-          {activeTab === 'catalogo' && (
-            <CatalogView categories={catalogCategories} items={catalogItems} onAddItem={handleAddCatalogItem} onUpdateItem={handleUpdateCatalogItem} onDeleteItem={handleDeleteCatalogItem} onClearAllItems={handleClearAllCatalogItems} onAddCategory={handleAddCatalogCategory} onUpdateCategory={handleUpdateCatalogCategory} onDeleteCategory={handleDeleteCatalogCategory} onResetToDefaults={handleResetCatalogToDefaults} />
-          )}
-          {activeTab === 'kits' && (
-            <KitsView kits={kits} catalogItems={catalogItems} catalogCategories={catalogCategories} onSaveKit={handleSaveKit} onDeleteKit={handleDeleteKit} onDuplicateKit={handleDuplicateKit} onUsarEnPresupuesto={() => irA('obras')} />
+          {(activeTab === 'catalogo' || activeTab === 'kits') && (
+            <MaterialsAndKitsView categories={catalogCategories} items={catalogItems} kits={kits}
+              onAddItem={handleAddCatalogItem} onUpdateItem={handleUpdateCatalogItem} onDeleteItem={handleDeleteCatalogItem} onClearAllItems={handleClearAllCatalogItems}
+              onAddCategory={handleAddCatalogCategory} onUpdateCategory={handleUpdateCatalogCategory} onDeleteCategory={handleDeleteCatalogCategory} onResetToDefaults={handleResetCatalogToDefaults}
+              onSaveKit={handleSaveKit} onDeleteKit={handleDeleteKit} onDuplicateKit={handleDuplicateKit} onUsarEnPresupuesto={() => irA('presupuestos')} />
           )}
           {activeTab === 'ventas' && (
             <SalesView invoices={invoices} clients={clients} projects={projects} companySettings={companySettings} siguienteNumero={siguienteNumeroFactura()} siguienteNumeroRectificativa={siguienteNumeroRectificativa()}
-              onCreateInvoice={handleCreateInvoice} onUpdateInvoiceStatus={handleUpdateInvoiceStatus} onUpdateInvoice={handleUpdateInvoice} onDeleteInvoice={handleDeleteInvoice}
+              onCreateInvoice={handleCreateInvoice} onUpdateInvoiceStatus={handleUpdateInvoiceStatus} onUpdateInvoice={handleUpdateInvoice}
               showNewInvoiceModal={showNewInvoiceModal} setShowNewInvoiceModal={setShowNewInvoiceModal} preselectedProject={preselectedProjectForInvoice} onAviso={(t, tipo) => setAviso({ texto: t, tipo: tipo || 'info' })} />
           )}
           {activeTab === 'gastos' && (

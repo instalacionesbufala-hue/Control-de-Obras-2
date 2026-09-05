@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Receipt, Plus, Search, HardHat, Building2, CheckCircle2, X, Eye, RefreshCw, Edit3, Trash2, Paperclip, Download, AlertCircle, Info } from 'lucide-react';
+import { Receipt, Plus, Search, HardHat, Building2, CheckCircle2, X, Eye, RefreshCw, Edit3, Trash2, Paperclip, Download, AlertCircle, Info, Sparkles } from 'lucide-react';
+import { extraerDatosTicket, comprimirImagen, DatosTicket } from '../lib/gemini';
 import { Expense, Project, Supplier, CompanySettings, ExpenseCategoria } from '../types';
 import { formatCurrency, formatDate, uid, redondear2 } from '../utils/formatters';
 import { PeriodFilter } from './PeriodFilter';
@@ -37,6 +38,11 @@ export const ExpensesView: React.FC<Props> = ({ expenses, projects, suppliers = 
   const [form, setForm] = useState<Form>(formVacio(preselectedProject));
   const [altaProveedor, setAltaProveedor] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Lector con IA: el archivo se guarda aparte (puede ser más grande que lo que cabe en el gasto) y solo se envía al pulsar el botón
+  const [archivoIA, setArchivoIA] = useState<string | null>(null);
+  const [leyendoIA, setLeyendoIA] = useState(false);
+  const [avisoIA, setAvisoIA] = useState<{ texto: string; tipo: 'ok' | 'aviso' } | null>(null);
+  const hayIA = !!companySettings.geminiApiKey?.trim();
   const fileRef = useRef<HTMLInputElement>(null);
   const anios = aniosDisponibles(expenses.map((e) => e.fecha));
 
@@ -44,6 +50,8 @@ export const ExpensesView: React.FC<Props> = ({ expenses, projects, suppliers = 
     if (showNewExpenseModal) {
       setForm(formVacio(preselectedProject));
       setError(null);
+      setArchivoIA(null);
+      setAvisoIA(null);
     }
   }, [showNewExpenseModal, preselectedProject]);
 
@@ -69,15 +77,66 @@ export const ExpensesView: React.FC<Props> = ({ expenses, projects, suppliers = 
   const adjuntar = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > LIMITE_ADJUNTO) {
-      setForm((x) => ({ ...x, adjuntoNombre: f.name, adjuntoDataUrl: undefined }));
-      setError(`El archivo supera ${LIMITE_ADJUNTO / 1024} KB: se guarda solo el nombre. Guarda el original en tu Drive.`);
-    } else {
-      const r = new FileReader();
-      r.onload = () => setForm((x) => ({ ...x, adjuntoNombre: f.name, adjuntoDataUrl: r.result as string }));
-      r.readAsDataURL(f);
+    setError(null);
+    setAvisoIA(null);
+    const leer = (file: Blob) => new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = () => rej(new Error('No se pudo leer el archivo.')); r.readAsDataURL(file); });
+    try {
+      let dataUrl: string;
+      if (f.type.startsWith('image/')) {
+        // Las fotos del móvil pesan varios MB: se reducen a 1.600 px para guardarlas y para la IA
+        dataUrl = await comprimirImagen(f);
+        if (dataUrl.length > LIMITE_ADJUNTO * 1.37) dataUrl = await comprimirImagen(f, 1200, 0.72);
+      } else {
+        dataUrl = await leer(f);
+      }
+      setArchivoIA(dataUrl.length < 6_000_000 ? dataUrl : null);
+      if (dataUrl.length > LIMITE_ADJUNTO * 1.37) {
+        setForm((x) => ({ ...x, adjuntoNombre: f.name, adjuntoDataUrl: undefined }));
+        setError(`El archivo supera ${LIMITE_ADJUNTO / 1024} KB: se guarda solo el nombre. Guarda el original en tu Drive.${hayIA ? ' La IA sí puede leerlo.' : ''}`);
+      } else {
+        setForm((x) => ({ ...x, adjuntoNombre: f.name, adjuntoDataUrl: dataUrl }));
+      }
+    } catch (err: any) {
+      setError(err?.message || 'No se pudo adjuntar el archivo.');
     }
     e.target.value = '';
+  };
+
+  const leerConIA = async () => {
+    if (!archivoIA) return setError('Adjunta primero la foto del ticket o el PDF de la factura.');
+    setLeyendoIA(true);
+    setError(null);
+    setAvisoIA(null);
+    try {
+      const d: DatosTicket = await extraerDatosTicket(companySettings.geminiApiKey || '', archivoIA);
+      const prov = suppliers.find((s) => (d.cif && s.cif && s.cif.replace(/\W/g, '').toUpperCase() === d.cif) || (d.proveedor && s.nombre.toLowerCase() === d.proveedor.toLowerCase()));
+      const metodo = METODOS.find((m) => m.toLowerCase() === (d.metodoPago || '').toLowerCase());
+      setForm((x) => ({
+        ...x,
+        proveedor: prov?.nombre || d.proveedor || x.proveedor,
+        cifProveedor: d.cif || prov?.cif || x.cifProveedor,
+        numeroFactura: d.esTicketSinFactura ? '' : d.numeroFactura || x.numeroFactura,
+        fecha: d.fecha || x.fecha,
+        concepto: d.concepto || x.concepto,
+        baseImponible: d.baseImponible ?? x.baseImponible,
+        ivaPorcentaje: d.ivaPorcentaje ?? x.ivaPorcentaje,
+        irpfRetencion: d.irpfPorcentaje || 0,
+        metodoPago: metodo || x.metodoPago,
+        categoria: (d.categoria as ExpenseCategoria) || (prov?.categoria as ExpenseCategoria) || x.categoria,
+        esRecurrente: x.esRecurrente || detectaRecurrente(d.concepto || ''),
+      }));
+      const nuevoProv = !prov && !!d.proveedor;
+      if (nuevoProv) setAltaProveedor(true);
+      const total = d.total !== undefined ? ` Total leído: ${formatCurrency(d.total)}.` : '';
+      setAvisoIA({
+        texto: `Datos leídos${d.confianza === 'baja' ? ' con poca seguridad: revisa los importes' : d.confianza === 'media' ? ', revísalos' : ''}.${total}${d.observaciones ? ` ${d.observaciones}` : ''}${nuevoProv ? ' El proveedor no existe: se dará de alta al guardar, corrige lo que veas mal.' : ''} Nada se guarda hasta que pulses Guardar.`,
+        tipo: d.confianza === 'baja' ? 'aviso' : 'ok',
+      });
+    } catch (err: any) {
+      setError(err?.message || 'La IA no pudo leer el documento.');
+    } finally {
+      setLeyendoIA(false);
+    }
   };
 
   const elegirProveedor = (nombre: string) => {
@@ -230,10 +289,14 @@ export const ExpensesView: React.FC<Props> = ({ expenses, projects, suppliers = 
             <div className="flex justify-between items-center pb-3 border-b border-slate-100"><h3 className="font-black text-slate-900 text-base flex items-center gap-2">{editando ? <Edit3 size={18} className="text-indigo-600" /> : <Plus size={18} className="text-blue-600" />} {editando ? 'Editar gasto' : 'Registrar gasto o factura de proveedor'}</h3><button onClick={() => { setShowNewExpenseModal(false); setEditando(null); }} className="text-slate-400 hover:text-slate-600 cursor-pointer"><X size={18} /></button></div>
             <form onSubmit={guardar} className="space-y-4 text-xs">
               <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-2xl flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-indigo-900"><Paperclip size={16} /><div><p className="font-bold">{form.adjuntoNombre || 'Adjunta la foto del ticket o el PDF de la factura'}</p><p className="text-[10px] text-indigo-700">Se guarda con el gasto (hasta {LIMITE_ADJUNTO / 1024} KB). Después rellena los datos a mano.</p></div></div>
+                <div className="flex items-center gap-2 text-indigo-900 min-w-0"><Paperclip size={16} className="shrink-0" /><div className="min-w-0"><p className="font-bold truncate">{form.adjuntoNombre || 'Adjunta la foto del ticket o el PDF de la factura'}</p><p className="text-[10px] text-indigo-700">{hayIA ? 'La IA puede leer los datos por ti; después los revisas y guardas.' : `Se guarda con el gasto (hasta ${LIMITE_ADJUNTO / 1024} KB). Rellena los datos a mano o activa el lector con IA en Configuración.`}</p></div></div>
                 <input type="file" ref={fileRef} accept="image/*,.pdf" className="hidden" onChange={adjuntar} />
-                <button type="button" onClick={() => fileRef.current?.click()} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shrink-0 cursor-pointer">{form.adjuntoNombre ? 'Cambiar' : 'Adjuntar'}</button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button type="button" onClick={() => fileRef.current?.click()} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold cursor-pointer">{form.adjuntoNombre ? 'Cambiar' : 'Adjuntar'}</button>
+                  {hayIA && archivoIA && !editando && <button type="button" onClick={leerConIA} disabled={leyendoIA} className="px-3 py-1.5 bg-slate-900 hover:bg-black text-white rounded-lg font-bold cursor-pointer flex items-center gap-1.5 disabled:opacity-60"><Sparkles size={13} className={leyendoIA ? 'animate-pulse' : ''} /> {leyendoIA ? 'Leyendo…' : 'Leer los datos con IA'}</button>}
+                </div>
               </div>
+              {avisoIA && <div className={`p-3 rounded-xl border flex items-start gap-2 ${avisoIA.tipo === 'ok' ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}><Sparkles size={14} className="shrink-0 mt-0.5" /> <span>{avisoIA.texto}</span></div>}
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block font-bold text-slate-700 mb-1">Proveedor *</label><input list="proveedores" value={form.proveedor} onChange={(e) => elegirProveedor(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 font-bold" required /><datalist id="proveedores">{suppliers.map((s) => <option key={s.id} value={s.nombre} />)}</datalist></div>
                 <div><label className="block font-bold text-slate-700 mb-1">NIF del proveedor</label><input value={form.cifProveedor} onChange={(e) => setForm({ ...form, cifProveedor: e.target.value.toUpperCase() })} placeholder="B12345678" className="w-full border border-slate-200 rounded-xl px-3 py-2 font-mono" /></div>

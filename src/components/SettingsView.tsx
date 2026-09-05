@@ -1,12 +1,14 @@
 import React, { useRef, useState } from 'react';
-import { Settings, ShieldCheck, Building2, CheckCircle2, Save, Image, LayoutTemplate, Palette, Upload, Trash2, Plus, RefreshCw, AlertTriangle, Cloud, Link as LinkIcon, X, UserCheck, HardHat, Download, Database, Hash, FileText, CalendarDays, Info } from 'lucide-react';
-import { CompanySettings, DocumentTemplate, AppState } from '../types';
+import { Settings, ShieldCheck, Building2, CheckCircle2, Save, Image, LayoutTemplate, Upload, Trash2, Plus, RefreshCw, AlertTriangle, Cloud, Link as LinkIcon, X, UserCheck, HardHat, Download, Database, Hash, FileText, CalendarDays, Info, Bell, Mail, Sparkles, Eye, EyeOff, Copy, Check } from 'lucide-react';
+import { probarClaveGemini, MODELO_GEMINI_DEFECTO } from '../lib/gemini';
+import { SCRIPT_AVISO_ACEPTACION, PASOS_SCRIPT } from '../data/appsScript';
+import { CompanySettings, AppState } from '../types';
 import { DEFAULT_TEMPLATES } from '../data/plantillas';
 import { loginWithGoogle, logoutGoogleUser, guardarCopiaEnNube, cargarUltimaCopiaNube, tamanoDocumentoKB, LIMITE_FIRESTORE_KB } from '../lib/cloudSync';
 import { exportarCopia, importarCopia, leerCopiaAnterior, tamanoEstadoKB } from '../lib/storage';
 import { firebaseDisponible } from '../lib/firebase';
 import { pedirPermisoGoogle, tieneToken, SCOPE_CALENDAR, SCOPE_GMAIL } from '../lib/googleToken';
-import { TEMPLATE_OPTIONS, FONT_OPTIONS } from './DocumentRenderer';
+import { TemplatesSettings } from './TemplatesSettings';
 import { numeroDocumento } from '../utils/formatters';
 import { fechaHoraES } from '../utils/dates';
 
@@ -27,9 +29,31 @@ interface Props {
 export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings, onDeleteExamples, onCargarEjemplos, hayDemo, estadoCompleto, onRestaurarEstado, firebaseUser, estadoNube, errorNube, onAviso }) => {
   const [f, setF] = useState<CompanySettings>({ ...companySettings, plantillasPersonalizadas: companySettings.plantillasPersonalizadas?.length ? companySettings.plantillasPersonalizadas : DEFAULT_TEMPLATES });
   const [guardado, setGuardado] = useState(false);
-  const [editTpl, setEditTpl] = useState<DocumentTemplate | null>(null);
-  const [nuevaTpl, setNuevaTpl] = useState(false);
   const [nuevoTecnico, setNuevoTecnico] = useState('');
+  const [permisoNotif, setPermisoNotif] = useState<'default' | 'granted' | 'denied' | 'no'>(typeof Notification === 'undefined' ? 'no' : (Notification.permission as any));
+  const [copiadoScript, setCopiadoScript] = useState(false);
+  const [claveVisible, setClaveVisible] = useState(false);
+  const [resultadoIA, setResultadoIA] = useState<{ ok: boolean; texto: string } | null>(null);
+  const pedirNotif = async () => {
+    try {
+      const r = await Notification.requestPermission();
+      setPermisoNotif(r as any);
+      if (r === 'granted') new Notification('Avisos activados', { body: 'Así verás cuando un cliente acepte un presupuesto.' });
+    } catch {
+      // sin soporte
+    }
+  };
+  const probarIA = async () => {
+    setOcupado('ia');
+    setResultadoIA(null);
+    try {
+      setResultadoIA({ ok: true, texto: await probarClaveGemini(f.geminiApiKey || '') });
+    } catch (e: any) {
+      setResultadoIA({ ok: false, texto: e?.message || 'No funciona.' });
+    } finally {
+      setOcupado(null);
+    }
+  };
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [confirmarRestaurar, setConfirmarRestaurar] = useState<{ st: AppState; origen: string } | null>(null);
   const logoRef = useRef<HTMLInputElement>(null);
@@ -157,16 +181,6 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
   };
 
   const plantillas = f.plantillasPersonalizadas || DEFAULT_TEMPLATES;
-  const guardarTpl = (t: DocumentTemplate) => {
-    set('plantillasPersonalizadas', nuevaTpl ? [...plantillas, t] : plantillas.map((x) => (x.id === t.id ? t : x)));
-    setEditTpl(null);
-  };
-  const borrarTpl = (id: string) => {
-    if (plantillas.length <= 1) return alert('Debe quedar al menos una plantilla.');
-    const resto = plantillas.filter((t) => t.id !== id);
-    set('plantillasPersonalizadas', resto);
-    if (f.plantillaPorDefecto === id) set('plantillaPorDefecto', resto[0].id);
-  };
 
   const kb = tamanoEstadoKB(estadoCompleto);
   const kbNube = tamanoDocumentoKB(estadoCompleto);
@@ -239,36 +253,50 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
         </Seccion>
 
         {/* 4. TÉCNICOS Y FRANJAS */}
-        <Seccion icono={<HardHat size={22} />} color="amber" titulo="Técnicos y franjas horarias" sub="Para asignar citas y calcular los huecos libres que se proponen al cliente">
+        <Seccion icono={<HardHat size={22} />} color="amber" titulo="Técnicos y franjas horarias" sub="Para asignar citas y calcular los huecos libres que se proponen al cliente. Puedes quitar una franja para todos o solo para un técnico.">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
             <div className="space-y-2">
-              <p className="font-bold text-slate-700">Técnicos</p>
-              <div className="flex flex-wrap gap-2">{(f.tecnicos || []).map((t) => <span key={t} className="px-3 py-1.5 bg-slate-100 rounded-xl font-bold text-slate-700 flex items-center gap-1.5">{t}<button type="button" onClick={() => set('tecnicos', f.tecnicos.filter((x) => x !== t))} className="text-slate-400 hover:text-rose-600 cursor-pointer"><X size={12} /></button></span>)}{(f.tecnicos || []).length === 0 && <span className="text-slate-400">Sin técnicos: se usará tu nombre.</span>}</div>
+              <p className="font-bold text-slate-700">Técnicos y franjas que cubre cada uno</p>
+              <div className="space-y-1.5">
+                {(f.tecnicos || []).map((t) => {
+                  const d = (f.disponibilidadTecnicos || {})[t] || { manana: true, tarde: true };
+                  const cambiar = (k: 'manana' | 'tarde') => set('disponibilidadTecnicos', { ...(f.disponibilidadTecnicos || {}), [t]: { ...d, [k]: !d[k] } });
+                  return (
+                    <div key={t} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                      <span className="font-bold text-slate-800 flex-1 truncate">{t}</span>
+                      {(['manana', 'tarde'] as const).map((k) => (
+                        <label key={k} className={`flex items-center gap-1 px-2 py-1 rounded-lg cursor-pointer border ${d[k] ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-white border-slate-200 text-slate-400 line-through'} ${f.franjasActivas?.[k] === false ? 'opacity-40' : ''}`} title={f.franjasActivas?.[k] === false ? 'Franja desactivada para toda la empresa' : ''}>
+                          <input type="checkbox" checked={d[k]} onChange={() => cambiar(k)} className="accent-emerald-600" /> {k === 'manana' ? 'Mañana' : 'Tarde'}
+                        </label>
+                      ))}
+                      <button type="button" onClick={() => { const disp = { ...(f.disponibilidadTecnicos || {}) }; delete disp[t]; set('disponibilidadTecnicos', disp); set('tecnicos', f.tecnicos.filter((x) => x !== t)); }} className="text-slate-400 hover:text-rose-600 cursor-pointer" title="Quitar técnico"><X size={14} /></button>
+                    </div>
+                  );
+                })}
+                {(f.tecnicos || []).length === 0 && <span className="text-slate-400">Sin técnicos: se usará tu nombre y se ofrecerán las franjas activas.</span>}
+              </div>
               <div className="flex gap-2"><input value={nuevoTecnico} onChange={(e) => setNuevoTecnico(e.target.value)} placeholder="Nombre del técnico" className="flex-1 border border-slate-200 rounded-xl px-3 py-2" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (nuevoTecnico.trim()) { set('tecnicos', [...(f.tecnicos || []), nuevoTecnico.trim()]); setNuevoTecnico(''); } } }} /><button type="button" onClick={() => { if (nuevoTecnico.trim()) { set('tecnicos', [...(f.tecnicos || []), nuevoTecnico.trim()]); setNuevoTecnico(''); } }} className="px-3 py-2 bg-slate-900 text-white rounded-xl font-bold cursor-pointer"><Plus size={14} /></button></div>
             </div>
             <div className="space-y-2">
               <p className="font-bold text-slate-700">Franjas para las citas</p>
-              {(['manana', 'tarde'] as const).map((k) => <div key={k} className="flex items-center gap-2"><span className="w-16 font-bold text-slate-600">{k === 'manana' ? 'Mañana' : 'Tarde'}</span><input type="time" value={f.franjas[k].inicio} onChange={(e) => set('franjas', { ...f.franjas, [k]: { ...f.franjas[k], inicio: e.target.value } })} className="border border-slate-200 rounded-xl px-2 py-1.5" /><span>a</span><input type="time" value={f.franjas[k].fin} onChange={(e) => set('franjas', { ...f.franjas, [k]: { ...f.franjas[k], fin: e.target.value } })} className="border border-slate-200 rounded-xl px-2 py-1.5" /></div>)}
-              <p className="text-[10px] text-slate-400">Los huecos libres se calculan de lunes a viernes con estas dos franjas, descartando las que ya tienen cita.</p>
+              {(['manana', 'tarde'] as const).map((k) => {
+                const activa = f.franjasActivas?.[k] !== false;
+                return (
+                  <div key={k} className={`flex items-center gap-2 flex-wrap ${activa ? '' : 'opacity-60'}`}>
+                    <label className="flex items-center gap-1.5 w-24 font-bold text-slate-600 cursor-pointer"><input type="checkbox" checked={activa} onChange={() => set('franjasActivas', { manana: true, tarde: true, ...(f.franjasActivas || {}), [k]: !activa })} className="accent-emerald-600" /> {k === 'manana' ? 'Mañana' : 'Tarde'}</label>
+                    <input type="time" disabled={!activa} value={f.franjas[k].inicio} onChange={(e) => set('franjas', { ...f.franjas, [k]: { ...f.franjas[k], inicio: e.target.value } })} className="border border-slate-200 rounded-xl px-2 py-1.5" /><span>a</span><input type="time" disabled={!activa} value={f.franjas[k].fin} onChange={(e) => set('franjas', { ...f.franjas, [k]: { ...f.franjas[k], fin: e.target.value } })} className="border border-slate-200 rounded-xl px-2 py-1.5" />
+                    {!activa && <span className="text-[10px] text-rose-600 font-bold">No se ofrece</span>}
+                  </div>
+                );
+              })}
+              <p className="text-[10px] text-slate-400">Los huecos libres se calculan de lunes a viernes con las franjas activas. Una franja se ofrece mientras quede algún técnico que la cubra sin cita.</p>
             </div>
           </div>
         </Seccion>
 
         {/* 5. PLANTILLAS */}
-        <Seccion icono={<LayoutTemplate size={22} />} color="indigo" titulo="Plantillas de presupuesto y factura" sub="Color, tipografía, maquetación y textos de pie. La zona fiscal de la factura (identificación, totales, QR y leyenda VERI*FACTU) no se puede ocultar." accion={<button type="button" onClick={() => { setNuevaTpl(true); setEditTpl({ id: `tpl-${Date.now()}`, nombre: 'Nueva plantilla', descripcion: '', colorPrimario: '', acento: '#1D4ED8', base: 'moderna', fuente: 'sans', condicionesPago: f.condicionesPagoDefecto, notaFinal: f.notaFinalPresupuestoDefecto, pieDePagina: '', esPersonalizada: true }); }} className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer"><Plus size={14} /> Nueva plantilla</button>}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {plantillas.map((t) => {
-              const sel = f.plantillaPorDefecto === t.id;
-              return (
-                <div key={t.id} onClick={() => set('plantillaPorDefecto', t.id)} className={`p-4 rounded-2xl border-2 cursor-pointer ${sel ? 'border-blue-600 bg-blue-50/40' : 'border-slate-200/80 hover:border-slate-300'}`}>
-                  <div className="flex items-center justify-between"><div className="flex items-center gap-2"><div className="w-4 h-4 rounded-full border border-white shadow-xs" style={{ backgroundColor: t.acento }} /><span className="font-bold text-slate-900 text-sm">{t.nombre}</span></div>{sel && <span className="text-[10px] font-black uppercase bg-blue-600 text-white px-2 py-0.5 rounded-full">Por defecto</span>}</div>
-                  <p className="text-xs text-slate-500 mt-1">{t.descripcion || `${TEMPLATE_OPTIONS.find((o) => o.id === t.base)?.name || 'Moderna'} · ${FONT_OPTIONS.find((o) => o.id === t.fuente)?.name || 'Jakarta'}`}</p>
-                  {t.notaFinal && <p className="text-[11px] text-slate-400 mt-1 line-clamp-2 italic">“{t.notaFinal}”</p>}
-                  <div className="pt-3 mt-3 border-t border-slate-100 flex items-center justify-between text-xs"><button type="button" onClick={(e) => { e.stopPropagation(); setNuevaTpl(false); setEditTpl(t); }} className="text-slate-700 font-bold flex items-center gap-1 cursor-pointer"><Palette size={13} /> Editar</button>{plantillas.length > 1 && <button type="button" onClick={(e) => { e.stopPropagation(); if (confirm(`¿Eliminar la plantilla "${t.nombre}"?`)) borrarTpl(t.id); }} className="text-rose-500 cursor-pointer"><Trash2 size={13} /></button>}</div>
-                </div>
-              );
-            })}
-          </div>
+        <Seccion icono={<LayoutTemplate size={22} />} color="indigo" titulo="Plantillas de presupuesto y factura" sub="Elige el modelo, el color y la tipografía aquí, con vista previa en vivo. Los documentos se imprimen siempre con la plantilla predeterminada. La zona fiscal de la factura (identificación, totales, QR y leyenda VERI*FACTU) no se puede ocultar.">
+          <TemplatesSettings settings={f} plantillas={plantillas} plantillaPorDefecto={f.plantillaPorDefecto} onChangePlantillas={(lista) => set('plantillasPersonalizadas', lista)} onChangeDefecto={(id) => set('plantillaPorDefecto', id)} />
         </Seccion>
 
         {/* 6. GOOGLE Y NUBE */}
@@ -282,6 +310,53 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
               <div className="p-3 bg-white rounded-xl border border-slate-200"><p className="font-bold text-slate-800 flex items-center gap-1.5"><Database size={13} className="text-indigo-600" /> Nube</p><p className="text-[11px] text-slate-500 mt-1">Estado completo en Firestore de tu cuenta. Tamaño actual {kbNube} KB de {LIMITE_FIRESTORE_KB} KB{kbNube > LIMITE_FIRESTORE_KB * 0.8 ? ' · cerca del límite: reduce fotos incrustadas' : ''}.</p></div>
               <div className="p-3 bg-white rounded-xl border border-slate-200"><p className="font-bold text-slate-800 flex items-center gap-1.5"><CalendarDays size={13} className="text-emerald-600" /> Google Calendar y Gmail</p><p className="text-[11px] text-slate-500 mt-1">{tieneToken(SCOPE_CALENDAR) && tieneToken(SCOPE_GMAIL) ? 'Permiso activo (una hora): citas en tu calendario y envío de PDF desde tu Gmail.' : 'Permiso no concedido aún. También se pide al guardar una cita o al enviar un correo.'}</p><button type="button" onClick={permisoCalendar} disabled={!firebaseDisponible || ocupado === 'calendar'} className="mt-1.5 px-2.5 py-1 bg-emerald-600 text-white rounded-lg font-bold text-[11px] cursor-pointer disabled:opacity-50">Conceder permiso</button><input value={f.googleCalendarId || 'primary'} onChange={(e) => set('googleCalendarId', e.target.value)} className="mt-1.5 w-full border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-mono" title="ID del calendario (primary = principal)" /></div>
               <div className="p-3 bg-white rounded-xl border border-slate-200"><p className="font-bold text-slate-800 flex items-center gap-1.5"><Info size={13} className="text-slate-500" /> Aceptación desde el móvil del cliente</p><p className="text-[11px] text-slate-500 mt-1">Requiere la cuenta vinculada: el presupuesto se publica en la nube con un enlace único y la aceptación llega a la app al instante.</p></div>
+            </div>
+          </div>
+        </Seccion>
+
+        {/* 6b. AVISOS */}
+        <Seccion icono={<Bell size={22} />} color="amber" titulo="Avisos cuando el cliente acepta" sub="Con la app abierta el aviso llega al instante, con sonido y el botón para proponer franjas. Para enterarte con la app cerrada, un script gratuito de tu cuenta de Google te envía un correo.">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+              <p className="font-bold text-slate-800 flex items-center gap-1.5"><Bell size={13} className="text-amber-600" /> Aviso del navegador</p>
+              <p className="text-[11px] text-slate-500">{permisoNotif === 'granted' ? 'Permitido: cuando llegue una aceptación verás una notificación aunque estés en otra pestaña o con la ventana detrás.' : permisoNotif === 'denied' ? 'Bloqueado en este navegador. Actívalo en los ajustes del sitio (icono del candado junto a la dirección).' : permisoNotif === 'no' ? 'Este navegador no admite notificaciones.' : 'Sin permiso todavía. Pídelo una vez en cada dispositivo.'}</p>
+              {permisoNotif === 'default' && <button type="button" onClick={pedirNotif} className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold cursor-pointer flex items-center gap-1.5"><Bell size={13} /> Permitir avisos en este dispositivo</button>}
+              <p className="text-[10px] text-slate-400">Si el cliente acepta con la app cerrada, la aceptación no se pierde: queda guardada en la nube y aparece en cuanto abres la app.</p>
+            </div>
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+              <p className="font-bold text-slate-800 flex items-center gap-1.5"><Mail size={13} className="text-blue-600" /> Correo automático con un script de Google (gratis)</p>
+              <input value={f.avisoScriptUrl || ''} onChange={(e) => set('avisoScriptUrl', e.target.value.trim())} placeholder="https://script.google.com/macros/s/…/exec" className="w-full border border-slate-200 rounded-xl px-3 py-2 font-mono text-[11px]" />
+              {f.avisoScriptUrl && !/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(f.avisoScriptUrl) && <p className="text-[11px] text-rose-600 font-bold">La dirección debe empezar por https://script.google.com/macros/s/ y terminar en /exec.</p>}
+              <ol className="list-decimal pl-4 space-y-0.5 text-[11px] text-slate-600">{PASOS_SCRIPT.map((p) => <li key={p}>{p}</li>)}</ol>
+              <div className="flex items-center gap-2"><button type="button" onClick={() => { navigator.clipboard?.writeText(SCRIPT_AVISO_ACEPTACION); setCopiadoScript(true); setTimeout(() => setCopiadoScript(false), 2000); }} className="px-3 py-2 bg-slate-900 text-white rounded-xl font-bold cursor-pointer flex items-center gap-1.5">{copiadoScript ? <Check size={13} /> : <Copy size={13} />} {copiadoScript ? 'Copiado' : 'Copiar el código del script'}</button><span className="text-[10px] text-slate-400">Detalle en docs/AVISOS-Y-LECTOR-IA.md</span></div>
+              <p className="text-[10px] text-slate-400">El correo sale de tu propia cuenta y Gmail te avisa en el móvil. WhatsApp o SMS necesitarían una pasarela de pago y no están incluidos.</p>
+            </div>
+          </div>
+        </Seccion>
+
+        {/* 6c. LECTOR CON IA */}
+        <Seccion icono={<Sparkles size={22} />} color="indigo" titulo="Lector de tickets y facturas con IA" sub="En Gastos, al adjuntar la foto de un ticket o el PDF de una factura, la IA rellena proveedor, importes, fecha y categoría. Tú lo revisas antes de guardar: nada se guarda solo.">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+              <label className="block font-bold text-slate-800">Tu clave de la API de Gemini</label>
+              <div className="flex gap-2">
+                <input type={claveVisible ? 'text' : 'password'} value={f.geminiApiKey || ''} onChange={(e) => { set('geminiApiKey', e.target.value.trim()); setResultadoIA(null); }} placeholder="AIza…" className="flex-1 border border-slate-200 rounded-xl px-3 py-2 font-mono text-[11px]" autoComplete="off" />
+                <button type="button" onClick={() => setClaveVisible(!claveVisible)} className="px-3 py-2 bg-white border border-slate-200 rounded-xl cursor-pointer" title={claveVisible ? 'Ocultar' : 'Mostrar'}>{claveVisible ? <EyeOff size={14} /> : <Eye size={14} />}</button>
+                <button type="button" onClick={probarIA} disabled={!f.geminiApiKey || ocupado === 'ia'} className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold cursor-pointer disabled:opacity-50">{ocupado === 'ia' ? 'Probando…' : 'Probar'}</button>
+              </div>
+              {resultadoIA && <p className={`text-[11px] font-bold ${resultadoIA.ok ? 'text-emerald-700' : 'text-rose-600'}`}>{resultadoIA.texto}</p>}
+              {f.geminiApiKey && <button type="button" onClick={() => { set('geminiApiKey', ''); setResultadoIA(null); }} className="text-[11px] text-rose-600 font-bold hover:underline cursor-pointer">Quitar la clave</button>}
+              <p className="text-[10px] text-slate-400">Es tu clave, de tu cuenta de Google: no va en el código de la app. Se guarda en tu configuración y se sincroniza entre tus dispositivos por tu nube (solo tu cuenta puede leerla). No se incluye en las copias de seguridad que exportas.</p>
+            </div>
+            <div className="p-4 bg-white rounded-2xl border border-slate-200 space-y-2">
+              <p className="font-bold text-slate-800">Cómo conseguirla (gratis, 2 minutos)</p>
+              <ol className="list-decimal pl-4 space-y-1 text-[11px] text-slate-600">
+                <li>Entra en <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-blue-600 font-bold hover:underline">aistudio.google.com/apikey</a> con tu cuenta de Google.</li>
+                <li>Pulsa <strong>Create API key</strong>. Si te pide proyecto, elige el de la app o crea uno nuevo.</li>
+                <li>Copia la clave (empieza por AIza) y pégala aquí. Pulsa <strong>Probar</strong> y luego <strong>Guardar cambios</strong>.</li>
+                <li>En Gastos → Nuevo gasto → Adjuntar, aparecerá el botón <strong>Leer los datos con IA</strong>.</li>
+              </ol>
+              <p className="text-[10px] text-slate-400">La foto del ticket se envía a Google para leerla. El nivel gratuito da de sobra para el uso diario. Modelo: {MODELO_GEMINI_DEFECTO}.</p>
             </div>
           </div>
         </Seccion>
@@ -324,26 +399,6 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
       </form>
 
       {/* EDITOR DE PLANTILLA */}
-      {editTpl && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl space-y-4 my-6">
-            <div className="flex justify-between items-center pb-3 border-b border-slate-100"><h3 className="font-black text-slate-900 text-base flex items-center gap-2"><Palette size={18} className="text-blue-600" /> {nuevaTpl ? 'Nueva plantilla' : `Editar: ${editTpl.nombre}`}</h3><button onClick={() => setEditTpl(null)} className="text-slate-400 hover:text-slate-700 cursor-pointer"><X size={18} /></button></div>
-            <div className="space-y-3 text-xs">
-              <div><label className="block font-bold text-slate-700 mb-1">Nombre *</label><input value={editTpl.nombre} onChange={(e) => setEditTpl({ ...editTpl, nombre: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2 font-bold" /></div>
-              <div><label className="block font-bold text-slate-700 mb-1">Descripción</label><input value={editTpl.descripcion} onChange={(e) => setEditTpl({ ...editTpl, descripcion: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2" /></div>
-              <div className="grid grid-cols-3 gap-3">
-                <div><label className="block font-bold text-slate-700 mb-1">Color</label><div className="flex items-center gap-2"><input type="color" value={editTpl.acento} onChange={(e) => setEditTpl({ ...editTpl, acento: e.target.value })} className="w-10 h-8 rounded-lg cursor-pointer border border-slate-200" /><input value={editTpl.acento} onChange={(e) => setEditTpl({ ...editTpl, acento: e.target.value })} className="w-full border border-slate-200 rounded-xl px-2 py-1.5 font-mono" /></div></div>
-                <div><label className="block font-bold text-slate-700 mb-1">Maquetación</label><select value={editTpl.base || 'moderna'} onChange={(e) => setEditTpl({ ...editTpl, base: e.target.value as any })} className="w-full border border-slate-200 rounded-xl px-2 py-2 bg-white">{TEMPLATE_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></div>
-                <div><label className="block font-bold text-slate-700 mb-1">Tipografía</label><select value={editTpl.fuente || 'sans'} onChange={(e) => setEditTpl({ ...editTpl, fuente: e.target.value })} className="w-full border border-slate-200 rounded-xl px-2 py-2 bg-white">{FONT_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></div>
-              </div>
-              <div><label className="block font-bold text-slate-700 mb-1">Comentario al pie del presupuesto</label><textarea value={editTpl.notaFinal || ''} onChange={(e) => setEditTpl({ ...editTpl, notaFinal: e.target.value })} rows={3} placeholder="Ej.: Pago 50 % a la aceptación del presupuesto y el resto al finalizar la instalación. Validez 30 días." className="w-full border border-slate-200 rounded-xl px-3 py-2" /></div>
-              <div><label className="block font-bold text-slate-700 mb-1">Condiciones al pie de la factura</label><textarea value={editTpl.condicionesPago || ''} onChange={(e) => setEditTpl({ ...editTpl, condicionesPago: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-xl px-3 py-2" /></div>
-              <div><label className="block font-bold text-slate-700 mb-1">Pie de página (texto legal, lema…)</label><input value={editTpl.pieDePagina || ''} onChange={(e) => setEditTpl({ ...editTpl, pieDePagina: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2" /></div>
-            </div>
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100"><button onClick={() => setEditTpl(null)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer">Cancelar</button><button onClick={() => guardarTpl(editTpl)} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs cursor-pointer">Guardar plantilla</button></div>
-          </div>
-        </div>
-      )}
 
       {confirmarRestaurar && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">

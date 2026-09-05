@@ -64,6 +64,16 @@ Desde la vista previa de cualquier presupuesto o factura, botón **Correo**. El 
 
 El botón **PDF** descarga el archivo sin enviar nada. **Imprimir / PDF** sigue disponible para imprimir con el diálogo del navegador.
 
+## Presupuestos, obras y facturas: el ciclo
+
+- **Presupuestos** muestra por defecto solo borradores y enviados. Filtros: Activos, Aceptados, Rechazados, Todos. Cuando el cliente acepta, el presupuesto pasa al filtro Aceptados en ámbar y aparece en **Obras**.
+- **Obras** muestra por defecto las que están en curso. Al terminar una obra, el botón **Convertir en factura** abre la factura con las líneas de la obra y la fecha del día (editable). Al emitirla, obra y presupuesto pasan a verde y salen de la vista por defecto.
+- La aceptación firmada del cliente (nombre, DNI, fecha y trazo) se guarda en el presupuesto, pasa a la obra y se imprime en la factura.
+- Las facturas emitidas **no se borran**: se anulan (registro de anulación) o se rectifican. Desde la factura abierta, el botón **Rectificar** crea la rectificativa con los mismos conceptos.
+- Las plantillas de presupuesto y factura se eligen en **Configuración → Plantillas**, con vista previa en vivo. Los documentos usan siempre la plantilla predeterminada.
+- En **Configuración → Técnicos y franjas** puedes quitar la franja de mañana o de tarde para toda la empresa o solo para un técnico. La agenda solo ofrece huecos que alguien cubra.
+- Avisos de aceptación y lector de tickets con IA: ver `docs/AVISOS-Y-LECTOR-IA.md`.
+
 ## Enlace de aceptación para el cliente
 
 Al enviar un presupuesto con la cuenta de Google vinculada, la app publica en Firestore un documento con un identificador aleatorio (sin costes internos) y genera el enlace `…/?aceptar=TOKEN`. El cliente:

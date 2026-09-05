@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, AlertCircle, ShieldCheck, FileText, Clock, CalendarDays, Copy, Check, Phone } from 'lucide-react';
+import { CheckCircle2, AlertCircle, ShieldCheck, FileText, Clock, CalendarDays, Copy, Check, Phone, Mail } from 'lucide-react';
 import { leerPropuesta, enviarAceptacion, PropuestaPublica } from '../lib/propuestas';
 import { generarCodigoAceptacion, sha256Hex, validarDniCif } from '../utils/acceptanceCrypto';
 import { formatCurrency, formatDate, telefonoWhatsApp } from '../utils/formatters';
@@ -66,6 +66,14 @@ export const PublicAcceptancePage: React.FC<{ token: string }> = ({ token }) => 
         userAgent: navigator.userAgent.substring(0, 120),
       });
       setCodigo(cod);
+      // Aviso instantáneo al instalador por su script de Google (opcional). No bloquea la aceptación.
+      if (propuesta.empresa.avisoUrl) {
+        try {
+          fetch(propuesta.empresa.avisoUrl, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ tipo: 'aceptacion', codigo: propuesta.presupuesto.codigo, nombre: propuesta.presupuesto.nombre, cliente: nombre.trim(), dni: dni.trim().toUpperCase(), total: formatCurrency(propuesta.presupuesto.total), hueco: hueco ? textoHueco(hueco) : '', notas: notas.trim(), fecha: fechaFirma, codigoAceptacion: cod }) }).catch(() => undefined);
+        } catch {
+          // sin aviso: la aceptación ya está guardada
+        }
+      }
     } catch (err: any) {
       setErrorForm(`No se ha podido registrar la aceptación (${err?.code || err?.message || 'error'}). Inténtalo de nuevo o avisa al instalador.`);
     } finally {
@@ -141,12 +149,16 @@ export const PublicAcceptancePage: React.FC<{ token: string }> = ({ token }) => 
           <div className="text-center py-4 space-y-4">
             <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto"><CheckCircle2 size={36} /></div>
             <h3 className="text-xl font-black text-slate-900">Presupuesto aceptado</h3>
-            <p className="text-sm text-slate-600">Hemos registrado tu aceptación del presupuesto <strong>{pr.codigo}</strong>{hueco ? ` y tu preferencia de cita (${textoHueco(hueco)})` : ''}. {emp.nombre} recibe el aviso al momento y te confirmará la fecha.</p>
+            <p className="text-sm text-slate-600">Hemos registrado tu aceptación del presupuesto <strong>{pr.codigo}</strong>{hueco ? ` y tu preferencia de cita (${textoHueco(hueco)})` : ''}. Queda guardada con fecha y hora.</p>
+            <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-left text-xs text-amber-900"><p className="font-bold">Un último paso: avísanos por el mismo medio por el que recibiste este presupuesto</p><p className="mt-1">Así {emp.nombre} lo ve al momento y te confirma la fecha de instalación cuanto antes. El mensaje ya va escrito, solo tienes que enviarlo.</p></div>
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-left">
               <span className="text-[10px] font-black uppercase text-slate-400 block mb-1">Tu código de aceptación (guárdalo)</span>
               <div className="flex gap-2"><input readOnly value={codigo} className="w-full font-mono text-[11px] bg-white p-2 rounded-lg border border-slate-300 select-all" /><button onClick={copiar} className="p-2 bg-slate-200 rounded-lg cursor-pointer">{copiado ? <Check size={15} /> : <Copy size={15} />}</button></div>
             </div>
-            {emp.telefono && <a href={`https://wa.me/${telefonoWhatsApp(emp.telefono)}?text=${encodeURIComponent(`Hola, acabo de aceptar el presupuesto ${pr.codigo}. Código: ${codigo}`)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold"><Phone size={14} /> Avisar también por WhatsApp</a>}
+            <div className="flex flex-wrap justify-center gap-2">
+              {emp.telefono && <a href={`https://wa.me/${telefonoWhatsApp(emp.telefono)}?text=${encodeURIComponent(`Hola, acabo de aceptar el presupuesto ${pr.codigo}${hueco ? ` y he elegido el hueco ${textoHueco(hueco)}` : ''}. Código de aceptación: ${codigo}`)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold"><Phone size={14} /> Avisar por WhatsApp</a>}
+              {emp.email && <a href={`mailto:${emp.email}?subject=${encodeURIComponent(`Presupuesto ${pr.codigo} aceptado`)}&body=${encodeURIComponent(`Hola, acabo de aceptar el presupuesto ${pr.codigo} (${pr.nombre}).${hueco ? `\nHueco elegido: ${textoHueco(hueco)}.` : ''}\nCódigo de aceptación: ${codigo}\n\nUn saludo,\n${nombre}`)}`} className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold"><Mail size={14} /> Avisar por correo</a>}
+            </div>
           </div>
         ) : cerrada ? (
           <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-sm text-amber-900 flex items-start gap-2"><Clock size={18} className="shrink-0 mt-0.5" /><span>Este presupuesto ya está {propuesta.estado === 'aceptada' ? 'aceptado' : propuesta.estado === 'rechazada' ? 'rechazado' : 'cerrado'}. Si necesitas cambios, contacta con {emp.nombre} ({emp.telefono}).</span></div>

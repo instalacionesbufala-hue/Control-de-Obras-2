@@ -20,6 +20,7 @@ export interface PropuestaPublica {
     email: string;
     logoUrl?: string;
     plantilla?: string;
+    avisoUrl?: string; // Apps Script del instalador que le envía un correo al aceptar
   };
   presupuesto: {
     id: string;
@@ -83,6 +84,7 @@ export function construirPropuesta(project: Project, settings: CompanySettings, 
       email: settings.email,
       logoUrl: settings.logoUrl && settings.logoUrl.length < 200000 ? settings.logoUrl : undefined,
       plantilla: project.plantillaPresupuesto,
+      avisoUrl: settings.avisoScriptUrl || undefined,
     },
     presupuesto: {
       id: project.id,

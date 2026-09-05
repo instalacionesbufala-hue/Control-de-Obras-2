@@ -1,6 +1,8 @@
 # Control de Obra
 
-Aplicación web para instaladores eléctricos y de puntos de recarga de vehículo eléctrico: presupuestos con aceptación desde el móvil del cliente, obras con cita y agenda, facturas con registro VERI*FACTU, gastos, banco y conciliación, rentabilidad, trimestre fiscal y copias de seguridad local y en la nube.
+Aplicación web para instaladores eléctricos y de puntos de recarga de vehículo eléctrico: presupuestos con aceptación firmada desde el móvil del cliente, obras con cita y agenda, conversión de la obra en factura con registro VERI*FACTU (rectificativas incluidas, sin borrado), gastos con lector de tickets por IA, banco y conciliación, rentabilidad, trimestre fiscal, plantillas con vista previa y copias de seguridad local y en la nube.
+
+Ciclo de vida en colores: gris borrador, azul enviado, ámbar aceptado y en ejecución, índigo terminada, verde facturada, rojo rechazado. Presupuestos y Obras son pestañas separadas y cada una oculta por defecto lo que ya pasó de fase.
 
 Sin datos privados de ninguna empresa: todo se configura en **Configuración** (empresa o autónomo, logotipo, numeración, técnicos, plantillas). Los ejemplos que aparecen al abrirla por primera vez son ficticios y se borran con un botón.
 
@@ -20,6 +22,7 @@ El repositorio incluye `.github/workflows/deploy.yml`: al subir a `main` se cons
 ## Documentación
 
 - `docs/GUIA-INICIO.md`: qué hace la app, dónde guarda los datos, cómo publicarla en Google AI Studio o GitHub Pages, configuración de Firebase, Google Calendar y Gmail, envío de PDF por correo, alcance real de VERI*FACTU y rectificativas.
+- `docs/AVISOS-Y-LECTOR-IA.md`: cómo te llega la aceptación del cliente (aviso en la app, script de Google para el correo) y cómo activar el lector de tickets con tu clave de Gemini.
 - `docs/ESTUDIO-SINCRONIZACION-BANCARIA.md`: opciones para leer los movimientos del banco (Norma 43 implementado; PSD2 requiere servidor) y cómo funcionan las propuestas de cruce.
 - `firestore.rules`: reglas de seguridad que hay que publicar en Firestore.
 

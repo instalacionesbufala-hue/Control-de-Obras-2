@@ -61,6 +61,10 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
   diasVencimientoFactura: 30,
   tecnicos: [],
   franjas: { manana: { inicio: '08:30', fin: '14:00' }, tarde: { inicio: '15:30', fin: '19:30' } },
+  franjasActivas: { manana: true, tarde: true },
+  disponibilidadTecnicos: {},
+  geminiApiKey: '',
+  avisoScriptUrl: '',
   verifactuCertificado: {
     instalado: false,
     nombreTitular: '',
@@ -82,6 +86,12 @@ export function migrarSettings(raw: Partial<CompanySettings> | undefined): Compa
   if (!s.tipoEntidad) s.tipoEntidad = 'empresa';
   if (!Array.isArray(s.tecnicos)) s.tecnicos = [];
   if (!s.franjas) s.franjas = DEFAULT_COMPANY_SETTINGS.franjas;
+  if (!s.franjasActivas) s.franjasActivas = { manana: true, tarde: true };
+  if (!s.disponibilidadTecnicos) s.disponibilidadTecnicos = {};
+  if (Array.isArray(s.plantillasPersonalizadas) && s.plantillasPersonalizadas.length) {
+    const ids = new Set(s.plantillasPersonalizadas.map((t) => t.id));
+    DEFAULT_TEMPLATES.forEach((d) => { if (!ids.has(d.id)) s.plantillasPersonalizadas!.push(d); });
+  }
   if (!s.verifactuCertificado) s.verifactuCertificado = DEFAULT_COMPANY_SETTINGS.verifactuCertificado;
   if (!s.bancoConexion) s.bancoConexion = { conectado: false, proveedor: 'manual', entidad: '' };
   if (!(s.bancoConexion as any).proveedor) (s.bancoConexion as any).proveedor = 'manual';
@@ -206,7 +216,8 @@ export function exportarCopia(state: AppState): string {
   const fecha = new Date();
   const p = (n: number) => String(n).padStart(2, '0');
   const nombre = `copia-control-de-obra-${fecha.getFullYear()}${p(fecha.getMonth() + 1)}${p(fecha.getDate())}-${p(fecha.getHours())}${p(fecha.getMinutes())}.json`;
-  const blob = new Blob([JSON.stringify({ ...state, exportadoEl: fecha.toISOString(), app: 'Control de Obra' }, null, 2)], { type: 'application/json' });
+  const sinClave = { ...state, companySettings: { ...state.companySettings, geminiApiKey: '' } };
+  const blob = new Blob([JSON.stringify({ ...sinClave, exportadoEl: fecha.toISOString(), app: 'Control de Obra' }, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

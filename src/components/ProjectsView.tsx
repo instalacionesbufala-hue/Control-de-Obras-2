@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FileCheck2, Plus, Search, Calendar, FileText, CheckCircle2, Trash2, Clock, User, MapPin, X, Upload, HardHat, XCircle, Sparkles, Check, ShieldCheck, Send, Phone, Mail, Eye, CalendarDays, Calculator, Lock, PenTool, PackagePlus, Copy, Link as LinkIcon, AlertCircle, EyeOff, Edit3, Image as ImageIcon, Info } from 'lucide-react';
 import { Project, Client, ProjectDocument, ProjectPhoto, ProjectLog, PresupuestoPartida, CatalogCategory, CatalogItem, MaterialCostComponent, CalendarInstallation, CompanySettings, Kit, FirmaCliente, HuecoPropuesto, Invoice } from '../types';
 import { formatCurrency, formatDate, uid, telefonoWhatsApp, redondear2 } from '../utils/formatters';
@@ -23,6 +23,9 @@ interface Props {
   invoices: Invoice[];
   firebaseUid: string | null;
   siguienteCodigo: string;
+  modo: 'presupuestos' | 'obras';
+  abrirCitaDe?: string | null; // App pide abrir "Proponer franjas" para este proyecto (aviso de aceptación)
+  onCitaAbierta?: () => void;
   onSelectProject: (id: string | null) => void;
   onCreateProject: (p: Omit<Project, 'id' | 'fotos' | 'documentos' | 'bitacora' | 'desgloseGastos'>) => Project;
   onUpdateProject: (id: string, campos: Partial<Project>) => void;
@@ -42,7 +45,21 @@ interface Props {
 }
 
 const LIMITE_ADJUNTO = 400 * 1024;
-const ES_OBRA = (e: Project['estado']) => ['Aceptado', 'En ejecución', 'En legalización CIE', 'Finalizada', 'Facturada'].includes(e);
+const ES_OBRA = (e: Project['estado']) => ['Aceptado', 'En ejecución', 'En legalización CIE', 'Finalizada', 'Facturada', 'Pausada'].includes(e);
+
+// Ciclo de vida en colores: gris borrador · azul enviado · ámbar en ejecución · índigo terminada
+// lista para facturar · verde facturada (ciclo cerrado) · rojo apagado rechazado.
+const COLOR_ESTADO: Record<string, { badge: string; barra: string }> = {
+  Borrador: { badge: 'bg-slate-100 text-slate-700 border-slate-200', barra: 'border-l-slate-300' },
+  Enviado: { badge: 'bg-blue-50 text-blue-700 border-blue-200', barra: 'border-l-blue-500' },
+  Aceptado: { badge: 'bg-amber-50 text-amber-800 border-amber-200', barra: 'border-l-amber-500' },
+  'En ejecución': { badge: 'bg-amber-100 text-amber-900 border-amber-300', barra: 'border-l-amber-500' },
+  'En legalización CIE': { badge: 'bg-amber-50 text-amber-800 border-amber-200', barra: 'border-l-amber-400' },
+  Finalizada: { badge: 'bg-indigo-50 text-indigo-700 border-indigo-200', barra: 'border-l-indigo-500' },
+  Facturada: { badge: 'bg-emerald-100 text-emerald-800 border-emerald-300', barra: 'border-l-emerald-500' },
+  Rechazado: { badge: 'bg-rose-50 text-rose-600 border-rose-200', barra: 'border-l-rose-300' },
+  Pausada: { badge: 'bg-slate-100 text-slate-600 border-slate-300', barra: 'border-l-slate-400' },
+};
 
 const recalcPartida = (p: PresupuestoPartida): PresupuestoPartida => {
   const mats = (p.materiales || []).map((m) => ({ ...m, totalCoste: redondear2(m.cantidad * m.costeUnitario) }));
@@ -51,11 +68,14 @@ const recalcPartida = (p: PresupuestoPartida): PresupuestoPartida => {
 };
 
 export const ProjectsView: React.FC<Props> = (props) => {
-  const { projects, clients, selectedProjectId, companySettings, catalogCategories, catalogItems, kits, calendarEvents, invoices, firebaseUid, siguienteCodigo, onSelectProject, onCreateProject, onUpdateProject, onUpdateProjectStatus, onAcceptBudgetAndConvertToObra, onConfirmarCita, onDeleteProject, onAddLog, onAddDocument, onAddPhoto, onOpenNewInvoiceForProject, onOpenNewExpenseForProject, onAviso } = props;
+  const { projects, clients, selectedProjectId, companySettings, catalogCategories, catalogItems, kits, calendarEvents, invoices, firebaseUid, siguienteCodigo, modo, abrirCitaDe, onCitaAbierta, onSelectProject, onCreateProject, onUpdateProject, onUpdateProjectStatus, onAcceptBudgetAndConvertToObra, onConfirmarCita, onDeleteProject, onAddLog, onAddDocument, onAddPhoto, onOpenNewInvoiceForProject, onOpenNewExpenseForProject, onAviso } = props;
 
   const [periodo, setPeriodo] = useState<PeriodoFiltro>(periodoActual());
   const [busqueda, setBusqueda] = useState('');
-  const [filtro, setFiltro] = useState<'todos' | 'presupuestos' | 'obras' | 'Rechazado'>('todos');
+  const esPresupuestos = modo === 'presupuestos';
+  type SubFiltro = 'activos' | 'aceptados' | 'rechazados' | 'todos' | 'curso' | 'facturadas' | 'todas';
+  const [sub, setSub] = useState<SubFiltro>(esPresupuestos ? 'activos' : 'curso');
+  useEffect(() => { setSub(esPresupuestos ? 'activos' : 'curso'); }, [esPresupuestos]);
   const [tab, setTab] = useState<'resumen' | 'partidas' | 'documentos' | 'fotos' | 'bitacora'>('resumen');
   const [showCreate, setShowCreate] = useState(false);
   const [editandoPartidas, setEditandoPartidas] = useState(false);
@@ -111,12 +131,35 @@ export const ProjectsView: React.FC<Props> = (props) => {
 
   const filtrados = useMemo(() => projects.filter((p) => {
     if (!coincidePeriodo(p.fechaInicio, periodo)) return false;
-    if (filtro === 'presupuestos' && (ES_OBRA(p.estado) || p.estado === 'Rechazado')) return false;
-    if (filtro === 'obras' && !ES_OBRA(p.estado)) return false;
-    if (filtro === 'Rechazado' && p.estado !== 'Rechazado') return false;
+    const obra = ES_OBRA(p.estado);
+    if (esPresupuestos) {
+      // Vista por defecto: solo lo que sigue vivo como presupuesto. Lo aceptado ya está en Obras
+      // y lo rechazado tiene su propio filtro, así que desaparecen de la vista inicial.
+      if (sub === 'activos' && (obra || p.estado === 'Rechazado')) return false;
+      if (sub === 'aceptados' && !obra) return false;
+      if (sub === 'rechazados' && p.estado !== 'Rechazado') return false;
+    } else {
+      if (!obra) return false;
+      if (sub === 'curso' && p.estado === 'Facturada') return false;
+      if (sub === 'facturadas' && p.estado !== 'Facturada') return false;
+    }
     const q = busqueda.toLowerCase();
     return !q || p.nombre.toLowerCase().includes(q) || p.codigo.toLowerCase().includes(q) || (p.obraCodigo || '').toLowerCase().includes(q) || p.clienteNombre.toLowerCase().includes(q) || p.direccion.toLowerCase().includes(q);
-  }).sort((a, b) => b.fechaInicio.localeCompare(a.fechaInicio)), [projects, periodo, filtro, busqueda]);
+  }).sort((a, b) => b.fechaInicio.localeCompare(a.fechaInicio)), [projects, periodo, sub, busqueda, esPresupuestos]);
+
+  // Recuentos de cada filtro, sobre el periodo elegido
+  const cuenta = useMemo(() => {
+    const enPeriodo = projects.filter((p) => coincidePeriodo(p.fechaInicio, periodo));
+    return {
+      activos: enPeriodo.filter((p) => !ES_OBRA(p.estado) && p.estado !== 'Rechazado').length,
+      aceptados: enPeriodo.filter((p) => ES_OBRA(p.estado)).length,
+      rechazados: enPeriodo.filter((p) => p.estado === 'Rechazado').length,
+      todos: enPeriodo.length,
+      curso: enPeriodo.filter((p) => ES_OBRA(p.estado) && p.estado !== 'Facturada').length,
+      facturadas: enPeriodo.filter((p) => p.estado === 'Facturada').length,
+      todasObras: enPeriodo.filter((p) => ES_OBRA(p.estado)).length,
+    };
+  }, [projects, periodo]);
 
   // ---- Totales del formulario ----
   const tot = useMemo(() => {
@@ -243,6 +286,13 @@ export const ProjectsView: React.FC<Props> = (props) => {
     setCitaHuecos(p.huecosPropuestos?.length ? p.huecosPropuestos : libres.slice(0, 4));
     setHuecoConfirmar(p.huecoElegido || null);
   };
+  useEffect(() => {
+    if (!abrirCitaDe) return;
+    const p = projects.find((x) => x.id === abrirCitaDe);
+    if (p) { onSelectProject(p.id); setTab('resumen'); abrirCita(p, 'proponer'); }
+    onCitaAbierta?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abrirCitaDe]);
   const proponerHuecos = (p: Project) => {
     if (citaHuecos.length === 0) return;
     onUpdateProject(p.id, { huecosPropuestos: citaHuecos, tecnicosAsignados: citaTecnicos });
@@ -306,10 +356,7 @@ export const ProjectsView: React.FC<Props> = (props) => {
     e.target.value = '';
   };
 
-  const badge = (estado: Project['estado']) => {
-    const m: Record<string, string> = { Borrador: 'bg-slate-100 text-slate-700 border-slate-200', Enviado: 'bg-blue-50 text-blue-700 border-blue-200', Aceptado: 'bg-emerald-50 text-emerald-700 border-emerald-200', 'En ejecución': 'bg-indigo-50 text-indigo-700 border-indigo-200', 'En legalización CIE': 'bg-amber-50 text-amber-800 border-amber-200', Finalizada: 'bg-slate-900 text-white border-slate-900', Facturada: 'bg-slate-700 text-white border-slate-700', Rechazado: 'bg-rose-50 text-rose-700 border-rose-200', Pausada: 'bg-amber-50 text-amber-800 border-amber-200' };
-    return <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-full border ${m[estado] || m.Borrador}`}>{estado}</span>;
-  };
+  const badge = (estado: Project['estado']) => <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-full border ${(COLOR_ESTADO[estado] || COLOR_ESTADO.Borrador).badge}`}>{estado}</span>;
 
   const facturasDe = (p: Project) => invoices.filter((i) => i.obraId === p.id && !['Anulada', 'Rectificada'].includes(i.estado));
 
@@ -317,19 +364,22 @@ export const ProjectsView: React.FC<Props> = (props) => {
     <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3"><FileCheck2 className="text-blue-600" size={28} /> Presupuestos y obras</h1>
-          <p className="text-slate-500 text-sm mt-1">Presupuesto → aceptación del cliente → obra con cita → factura con la firma · {etiquetaPeriodo(periodo)}</p>
+          <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3">{esPresupuestos ? <><FileText className="text-blue-600" size={28} /> Presupuestos</> : <><HardHat className="text-amber-600" size={28} /> Obras</>}</h1>
+          <p className="text-slate-500 text-sm mt-1">{esPresupuestos ? 'Preparar, enviar y esperar la aceptación firmada del cliente. Al aceptarse pasa a Obras.' : 'Trabajos en marcha. Al terminar, se convierten en factura y el ciclo se cierra en verde.'} · {etiquetaPeriodo(periodo)}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <PeriodFilter value={periodo} onChange={setPeriodo} anios={anios} totalFiltrado={filtrados.length} totalGlobal={projects.length} />
-          <button onClick={abrirCrear} className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2.5 rounded-2xl shadow-md flex items-center gap-2 cursor-pointer"><Plus size={16} /> Nuevo presupuesto {siguienteCodigo}</button>
+          {esPresupuestos && <button onClick={abrirCrear} className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2.5 rounded-2xl shadow-md flex items-center gap-2 cursor-pointer"><Plus size={16} /> Nuevo presupuesto {siguienteCodigo}</button>}
         </div>
       </div>
 
       <div className="bg-white p-4 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row gap-3 items-center justify-between">
         <div className="relative w-full md:w-80"><Search className="absolute left-4 top-3 text-slate-400" size={18} /><input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} className="w-full pl-11 pr-4 py-2.5 border border-slate-200 rounded-2xl bg-slate-50/80 text-xs outline-none" placeholder="Cliente, código, dirección…" /></div>
         <div className="flex bg-slate-100/90 p-1.5 rounded-2xl">
-          {([['todos', `Todos (${projects.length})`], ['presupuestos', 'Presupuestos'], ['obras', 'Obras'], ['Rechazado', 'Rechazados']] as const).map(([id, l]) => <button key={id} onClick={() => setFiltro(id)} className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${filtro === id ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'}`}>{l}</button>)}
+          {(esPresupuestos
+            ? ([['activos', `Activos (${cuenta.activos})`], ['aceptados', `Aceptados (${cuenta.aceptados})`], ['rechazados', `Rechazados (${cuenta.rechazados})`], ['todos', `Todos (${cuenta.todos})`]] as const)
+            : ([['curso', `En curso (${cuenta.curso})`], ['facturadas', `Facturadas (${cuenta.facturadas})`], ['todas', `Todas (${cuenta.todasObras})`]] as const)
+          ).map(([id, l]) => <button key={id} onClick={() => setSub(id)} className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${sub === id ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'}`}>{l}</button>)}
         </div>
       </div>
 
@@ -337,17 +387,18 @@ export const ProjectsView: React.FC<Props> = (props) => {
         {/* LISTA */}
         <div className="lg:col-span-5 space-y-3">
           <span className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1">{filtrados.length} registros</span>
-          {filtrados.length === 0 && <div className="p-8 bg-white rounded-3xl border border-dashed border-slate-200 text-center text-xs text-slate-400">Nada en {etiquetaPeriodo(periodo).toLowerCase()}. {projects.length > 0 && <button onClick={() => setPeriodo({ mes: 'todos', anio: 'todos' })} className="text-blue-600 font-bold hover:underline cursor-pointer">Ver todo</button>}</div>}
+          {filtrados.length === 0 && <div className="p-8 bg-white rounded-3xl border border-dashed border-slate-200 text-center text-xs text-slate-400">{esPresupuestos && sub === 'activos' ? 'Ningún presupuesto pendiente de respuesta' : 'Nada'} en {etiquetaPeriodo(periodo).toLowerCase()}. {projects.length > 0 && <button onClick={() => setPeriodo({ mes: 'todos', anio: 'todos' })} className="text-blue-600 font-bold hover:underline cursor-pointer">Ver todo</button>}</div>}
           {filtrados.map((p) => {
             const sel = p.id === selectedProjectId;
             const obra = ES_OBRA(p.estado);
             return (
-              <div key={p.id} onClick={() => { onSelectProject(p.id); setTab('resumen'); }} className={`p-4 rounded-3xl border cursor-pointer space-y-2.5 ${sel ? 'bg-blue-50/50 border-blue-500 ring-2 ring-blue-500/20' : 'bg-white border-slate-200/80 hover:border-slate-300'}`}>
+              <div key={p.id} onClick={() => { onSelectProject(p.id); setTab('resumen'); }} className={`p-4 rounded-3xl border border-l-4 cursor-pointer space-y-2.5 ${(COLOR_ESTADO[p.estado] || COLOR_ESTADO.Borrador).barra} ${sel ? 'bg-blue-50/50 border-blue-500 ring-2 ring-blue-500/20' : 'bg-white border-slate-200/80 hover:border-slate-300'}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap"><span className="text-[11px] font-mono font-bold text-slate-500">{obra && p.obraCodigo ? p.obraCodigo : p.codigo}</span>{obra ? <span className="text-[10px] font-black uppercase bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded flex items-center gap-1"><HardHat size={10} /> Obra</span> : <span className="text-[10px] font-black uppercase bg-slate-100 text-slate-600 px-2 py-0.5 rounded flex items-center gap-1"><FileText size={10} /> Presupuesto</span>}{p.fechaCitaCalendario && <span className="text-[10px] font-bold bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded flex items-center gap-0.5 border border-amber-200"><Calendar size={10} /> {fechaES(p.fechaCitaCalendario.split('T')[0])}</span>}</div>
                     <h3 className="font-bold text-slate-900 text-sm mt-1 line-clamp-1">{p.nombre}</h3>
                     <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5"><User size={12} className="text-slate-400" /> {p.clienteNombre}</p>
+                    {p.firmaCliente && <p className="text-[10px] font-bold text-emerald-700 flex items-center gap-1 mt-1"><PenTool size={10} /> Firmado por {p.firmaCliente.firmadoPor}</p>}
                   </div>
                   {badge(p.estado)}
                 </div>
@@ -356,7 +407,7 @@ export const ProjectsView: React.FC<Props> = (props) => {
                   <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                     <button title="Enviar al cliente" onClick={() => abrirEnviar(p)} className="p-2 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-200 cursor-pointer"><Send size={14} /></button>
                     <button title="Ver documento" onClick={() => setPreview(p)} className="p-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 cursor-pointer"><Eye size={14} /></button>
-                    <button title="Eliminar" onClick={() => setABorrar(p)} className="p-2 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 cursor-pointer"><Trash2 size={14} /></button>
+                    {!p.firmaCliente && <button title="Eliminar" onClick={() => setABorrar(p)} className="p-2 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 cursor-pointer"><Trash2 size={14} /></button>}
                   </div>
                 </div>
               </div>
@@ -367,7 +418,7 @@ export const ProjectsView: React.FC<Props> = (props) => {
         {/* DETALLE */}
         <div className="lg:col-span-7">
           {!selected ? (
-            <div className="bg-white p-12 rounded-3xl border border-dashed border-slate-200 text-center space-y-3 text-slate-400"><FileCheck2 size={36} className="mx-auto text-slate-300" /><p className="font-bold text-sm text-slate-600">Selecciona un presupuesto u obra</p></div>
+            <div className="bg-white p-12 rounded-3xl border border-dashed border-slate-200 text-center space-y-3 text-slate-400"><FileCheck2 size={36} className="mx-auto text-slate-300" /><p className="font-bold text-sm text-slate-600">Selecciona {esPresupuestos ? 'un presupuesto' : 'una obra'} de la lista</p></div>
           ) : (() => {
             const p = selected;
             const c = clienteDe(p);
@@ -404,7 +455,7 @@ export const ProjectsView: React.FC<Props> = (props) => {
                     <button onClick={() => abrirCita(p, 'confirmar')} className="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"><Calendar size={14} /> Cambiar cita</button>
                     <button onClick={() => onOpenNewInvoiceForProject(p)} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer">Factura de anticipo</button>
                   </>}
-                  {(p.estado === 'En legalización CIE' || p.estado === 'Finalizada') && pendienteFacturar > 0.01 && <button onClick={() => onOpenNewInvoiceForProject(p)} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"><FileText size={14} /> Emitir factura ({formatCurrency(pendienteFacturar)} pendiente)</button>}
+                  {(p.estado === 'En legalización CIE' || p.estado === 'Finalizada') && pendienteFacturar > 0.01 && <button onClick={() => onOpenNewInvoiceForProject(p)} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"><FileText size={14} /> Convertir en factura ({formatCurrency(pendienteFacturar)} pendiente)</button>}
                   {p.estado === 'En legalización CIE' && <button onClick={() => { onUpdateProjectStatus(p.id, 'Finalizada'); onAddLog(p.id, 'Certificado CIE tramitado. Obra finalizada.', 'certificacion'); }} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer">CIE tramitado</button>}
                   {obra && <button onClick={() => onOpenNewExpenseForProject(p)} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer">Imputar gasto</button>}
                   <button onClick={() => setPreview(p)} className="px-3 py-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-800 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"><Eye size={14} /> Ver PDF</button>

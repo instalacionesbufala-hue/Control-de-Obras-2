@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Printer, X, ShieldCheck, CheckCircle2, FileText, Phone, Mail, Palette, Type, Sliders, Check, PenTool, Download, Share2, Send, AlertCircle } from 'lucide-react';
+import { Printer, X, ShieldCheck, CheckCircle2, FileText, Phone, Mail, PenTool, Download, Share2, Send, AlertCircle, RefreshCcw } from 'lucide-react';
 import { generarPDFDesdeElemento, descargarBlob, puedeCompartirArchivos, compartirPDF, nombreArchivoPDF } from '../lib/pdf';
 import { enviarConGmail, correoValido } from '../lib/gmail';
 import { firebaseDisponible } from '../lib/firebase';
@@ -60,6 +60,9 @@ interface DocumentRendererProps {
   onCorreoEnviado?: (canal: 'gmail' | 'compartir' | 'programa de correo') => void;
   onAceptarFirmar?: (project: Project) => void;
   onCambiarPlantilla?: (plantillaId: string) => void;
+  onRectificar?: (invoice: Invoice) => void; // facturas: emitir rectificativa con los mismos conceptos
+  embebido?: boolean; // solo el documento, sin barra ni fondo (vista previa en Configuración)
+  plantillaForzada?: DocumentTemplate; // vista previa en vivo de una plantilla en edición
 }
 
 export function plantillaDe(settings: CompanySettings, id?: string): DocumentTemplate | undefined {
@@ -67,20 +70,20 @@ export function plantillaDe(settings: CompanySettings, id?: string): DocumentTem
   return lista.find((t) => t.id === id) || lista.find((t) => t.id === settings.plantillaPorDefecto) || lista[0];
 }
 
-export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, companySettings, client, onClose, onSendWhatsApp, onSendEmail, onAceptarFirmar, onCambiarPlantilla, abrirCorreo = false, enlaceAceptacion, onCorreoEnviado }) => {
+export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, companySettings, client, onClose, onSendWhatsApp, onSendEmail, onAceptarFirmar, onCambiarPlantilla, onRectificar, abrirCorreo = false, enlaceAceptacion, onCorreoEnviado, embebido = false, plantillaForzada }) => {
   void onSendEmail; // el correo se gestiona dentro (panel con PDF adjunto)
+  void onCambiarPlantilla; // la plantilla se elige en Configuración
   const isInvoice = tipo === 'f';
   const invoice = isInvoice ? (doc as Invoice) : null;
   const project = !isInvoice ? (doc as Project) : null;
 
   const plantillaInicial = plantillaDe(companySettings, isInvoice ? invoice?.plantillaFactura : project?.plantillaPresupuesto);
-  const [plantillaId, setPlantillaId] = useState<string>(plantillaInicial?.id || 'moderna');
-  const plantilla = plantillaDe(companySettings, plantillaId) || plantillaInicial;
+  const plantillaId = plantillaInicial?.id || 'moderna';
+  const plantilla = plantillaForzada || plantillaDe(companySettings, plantillaId) || plantillaInicial;
   const [currentTemplate, setCurrentTemplate] = useState<DocumentBaseTemplate>(plantilla?.base || 'moderna');
   const [accentColor, setAccentColor] = useState<string>(plantilla?.acento || '#2563EB');
   const [fontChoice, setFontChoice] = useState<string>(plantilla?.fuente || 'sans');
-  const [showConfigDrawer, setShowConfigDrawer] = useState(false);
-  const [mostrarMateriales, setMostrarMateriales] = useState(true);
+  const mostrarMateriales = true;
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [panelCorreo, setPanelCorreo] = useState(abrirCorreo);
   const [correoPara, setCorreoPara] = useState('');
@@ -94,7 +97,7 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
     setCurrentTemplate(plantilla.base || 'moderna');
     setAccentColor(plantilla.acento || '#2563EB');
     setFontChoice(plantilla.fuente || 'sans');
-  }, [plantillaId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [plantillaId, plantillaForzada?.base, plantillaForzada?.acento, plantillaForzada?.fuente]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Líneas y totales ----
   const { lineas, baseImponible, ivasPorTipo, ivaTotal, irpfTotal, totalDoc } = useMemo(() => {
@@ -230,10 +233,6 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
       .catch(() => setQrDataUrl(''));
   }, [isInvoice, urlQR]);
 
-  const cambiarPlantilla = (id: string) => {
-    setPlantillaId(id);
-    onCambiarPlantilla?.(id);
-  };
 
   // ---- Bloques comunes ----
   const cabeceraEmpresa = (claro = true) => (
@@ -426,88 +425,8 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
     </>
   );
 
-  return (
-    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto print:static print:bg-white print:p-0">
-      <div className="bg-slate-100 rounded-3xl max-w-5xl w-full max-h-[96vh] flex flex-col shadow-2xl overflow-hidden print:max-h-none print:shadow-none print:rounded-none print:bg-white">
-        {/* Barra de controles */}
-        <div className="p-3 sm:p-4 bg-slate-950 text-white flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 print:hidden">
-          <div className="flex items-center gap-3">
-            <span className="p-2 bg-blue-600 rounded-xl text-white"><FileText size={18} /></span>
-            <div>
-              <h3 className="font-black text-sm text-white flex items-center gap-2">{docTitulo} · <span className="font-mono text-cyan-400">{docNumero}</span></h3>
-              <p className="text-[11px] text-slate-400">{clienteNombre}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-            <select value={plantillaId} onChange={(e) => cambiarPlantilla(e.target.value)} className="bg-slate-900 border border-slate-800 text-xs font-bold text-slate-200 rounded-xl px-2 py-2 cursor-pointer" title="Plantilla">
-              {(companySettings.plantillasPersonalizadas || []).map((t) => <option key={t.id} value={t.id} className="bg-slate-900">{t.nombre}</option>)}
-            </select>
-            <button onClick={() => setShowConfigDrawer(!showConfigDrawer)} className={`p-2 rounded-xl text-xs font-bold border cursor-pointer flex items-center gap-1.5 ${showConfigDrawer ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white'}`} title="Ajustes de diseño"><Sliders size={14} /><span className="hidden sm:inline">Diseño</span></button>
-            {onSendWhatsApp && <button onClick={() => onSendWhatsApp(doc)} className="p-2 sm:px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer"><Phone size={14} /><span className="hidden sm:inline">WhatsApp</span></button>}
-            <button onClick={() => { setPanelCorreo(!panelCorreo); setShowConfigDrawer(false); }} className={`p-2 sm:px-3 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer ${panelCorreo ? 'bg-blue-600 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-200'}`} title="Enviar por correo con el PDF adjunto"><Mail size={14} /><span className="hidden sm:inline">Correo</span></button>
-            <button onClick={descargarPDF} disabled={!!ocupado} className="p-2 sm:px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer disabled:opacity-50" title="Descargar como archivo PDF"><Download size={14} className={ocupado === 'pdf' ? 'animate-bounce' : ''} /><span className="hidden sm:inline">{ocupado === 'pdf' ? 'Generando…' : 'PDF'}</span></button>
-            {puedeCompartirArchivos() && <button onClick={compartir} disabled={!!ocupado} className="p-2 sm:px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer disabled:opacity-50" title="Compartir el PDF (WhatsApp, correo…)"><Share2 size={14} /><span className="hidden sm:inline">Compartir</span></button>}
-            {project && !firma && (project.estado === 'Enviado' || project.estado === 'Borrador') && onAceptarFirmar && (
-              <button onClick={() => onAceptarFirmar(project)} className="p-2 sm:px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-xl flex items-center gap-1.5 cursor-pointer"><PenTool size={14} /><span>Aceptar aquí</span></button>
-            )}
-            <button onClick={() => window.print()} className="p-2 sm:px-3.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer" title="Imprimir o guardar como PDF"><Printer size={14} /><span className="hidden sm:inline">Imprimir / PDF</span></button>
-            {onClose && <button onClick={onClose} title="Cerrar" aria-label="Cerrar" className="w-8 h-8 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"><X size={18} /></button>}
-          </div>
-        </div>
-
-        {showConfigDrawer && (
-          <div className="bg-slate-900 border-b border-slate-800 p-4 text-xs text-slate-300 grid grid-cols-1 sm:grid-cols-4 gap-4 print:hidden">
-            <div>
-              <label className="block font-bold text-slate-400 mb-2 flex items-center gap-1.5"><Palette size={13} className="text-blue-400" /> Color</label>
-              <div className="flex items-center gap-2 flex-wrap">
-                {COLOR_PRESETS.map((c) => (
-                  <button key={c.hex} onClick={() => setAccentColor(c.hex)} className="w-6 h-6 rounded-full border-2 cursor-pointer flex items-center justify-center" style={{ backgroundColor: c.hex, borderColor: accentColor === c.hex ? '#fff' : 'transparent' }} title={c.name}>{accentColor === c.hex && <Check size={12} className="text-white" />}</button>
-                ))}
-                <input type="color" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} className="w-7 h-7 rounded-lg cursor-pointer bg-transparent border-0" />
-              </div>
-            </div>
-            <div>
-              <label className="block font-bold text-slate-400 mb-2 flex items-center gap-1.5"><Type size={13} className="text-blue-400" /> Tipografía</label>
-              <select value={fontChoice} onChange={(e) => setFontChoice(e.target.value)} className="w-full bg-slate-800 text-white rounded-xl px-3 py-1.5 border border-slate-700 cursor-pointer">
-                {FONT_OPTIONS.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block font-bold text-slate-400 mb-2">Maquetación</label>
-              <select value={currentTemplate} onChange={(e) => setCurrentTemplate(e.target.value as DocumentBaseTemplate)} className="w-full bg-slate-800 text-white rounded-xl px-3 py-1.5 border border-slate-700 cursor-pointer">
-                {TEMPLATE_OPTIONS.map((t) => <option key={t.id} value={t.id}>{t.name} · {t.desc}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block font-bold text-slate-400 mb-2">Materiales</label>
-              <label className="flex items-center gap-2 text-slate-300 cursor-pointer bg-slate-800/80 p-2 rounded-xl border border-slate-700">
-                <input type="checkbox" checked={mostrarMateriales} onChange={(e) => setMostrarMateriales(e.target.checked)} className="rounded text-blue-600" />
-                <span>Mostrar los materiales marcados como visibles (nunca sus costes)</span>
-              </label>
-            </div>
-          </div>
-        )}
-
-        {panelCorreo && (
-          <div className="bg-slate-900 border-b border-slate-800 p-4 text-xs text-slate-300 space-y-3 print:hidden">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div><label className="block font-bold text-slate-400 mb-1">Para</label><input value={correoPara} onChange={(e) => setCorreoPara(e.target.value)} placeholder="cliente@correo.es" className="w-full bg-slate-800 text-white rounded-xl px-3 py-2 border border-slate-700" /></div>
-              <div><label className="block font-bold text-slate-400 mb-1">Asunto</label><input value={correoAsunto} onChange={(e) => setCorreoAsunto(e.target.value)} className="w-full bg-slate-800 text-white rounded-xl px-3 py-2 border border-slate-700" /></div>
-            </div>
-            <div><label className="block font-bold text-slate-400 mb-1">Mensaje</label><textarea value={correoCuerpo} onChange={(e) => setCorreoCuerpo(e.target.value)} rows={5} className="w-full bg-slate-800 text-white rounded-xl px-3 py-2 border border-slate-700 font-sans" /></div>
-            <div className="flex flex-wrap items-center gap-2">
-              {firebaseDisponible && <button onClick={enviarGmail} disabled={!!ocupado} className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black flex items-center gap-2 cursor-pointer disabled:opacity-50"><Send size={14} className={ocupado === 'gmail' ? 'animate-pulse' : ''} /> {ocupado === 'gmail' ? 'Generando el PDF y enviando…' : 'Enviar desde mi Gmail con el PDF adjunto'}</button>}
-              {puedeCompartirArchivos() && <button onClick={compartir} disabled={!!ocupado} className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center gap-2 cursor-pointer disabled:opacity-50"><Share2 size={14} /> Compartir el PDF (WhatsApp, Gmail…)</button>}
-              <button onClick={abrirProgramaCorreo} disabled={!!ocupado} className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-bold flex items-center gap-2 cursor-pointer disabled:opacity-50"><Mail size={14} /> Descargar el PDF y abrir mi programa de correo</button>
-            </div>
-            {avisoCorreo && <div className={`p-3 rounded-xl border flex items-start gap-2 ${avisoCorreo.ok ? 'bg-emerald-900/40 border-emerald-700 text-emerald-200' : 'bg-rose-900/40 border-rose-700 text-rose-200'}`}>{avisoCorreo.ok ? <CheckCircle2 size={15} className="shrink-0 mt-0.5" /> : <AlertCircle size={15} className="shrink-0 mt-0.5" />}<span>{avisoCorreo.texto}</span></div>}
-            <p className="text-[10px] text-slate-500">El envío desde Gmail usa tu propia cuenta de Google (pide permiso la primera vez; dura una hora) y el correo queda en tus Enviados. El PDF se genera con la plantilla y el color que ves aquí.</p>
-          </div>
-        )}
-
-        {/* Documento */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-8 flex justify-center bg-slate-200/80 print:p-0 print:bg-white print:overflow-visible">
-          <div id="documento-imprimible" className={`w-full max-w-[800px] shadow-2xl print:shadow-none print:max-w-none ${isDark ? 'bg-slate-950 text-slate-100 border border-slate-800' : 'bg-white text-slate-900'}`} style={{ fontFamily: activeFont, borderRadius: currentTemplate === 'compacta' ? '4px' : '16px' }}>
+  const documento = (
+          <div id={embebido ? 'documento-muestra' : 'documento-imprimible'} className={`w-full max-w-[800px] shadow-2xl print:shadow-none print:max-w-none ${isDark ? 'bg-slate-950 text-slate-100 border border-slate-800' : 'bg-white text-slate-900'}`} style={{ fontFamily: activeFont, borderRadius: currentTemplate === 'compacta' ? '4px' : '16px' }}>
             {currentTemplate === 'moderna' && (
               <div className="space-y-6">
                 <div className="p-8 text-white flex flex-col sm:flex-row justify-between items-start gap-4 rounded-t-2xl" style={{ backgroundColor: accentColor }}>
@@ -584,6 +503,58 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
               </div>
             )}
           </div>
+  );
+
+  if (embebido) return <div className="w-full flex justify-center">{documento}</div>;
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto print:static print:bg-white print:p-0">
+      <div className="bg-slate-100 rounded-3xl max-w-5xl w-full max-h-[96vh] flex flex-col shadow-2xl overflow-hidden print:max-h-none print:shadow-none print:rounded-none print:bg-white">
+        {/* Barra de controles */}
+        <div className="p-3 sm:p-4 bg-slate-950 text-white flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 print:hidden">
+          <div className="flex items-center gap-3">
+            <span className="p-2 bg-blue-600 rounded-xl text-white"><FileText size={18} /></span>
+            <div>
+              <h3 className="font-black text-sm text-white flex items-center gap-2">{docTitulo} · <span className="font-mono text-cyan-400">{docNumero}</span></h3>
+              <p className="text-[11px] text-slate-400">{clienteNombre}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+            {onSendWhatsApp && <button onClick={() => onSendWhatsApp(doc)} className="p-2 sm:px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer"><Phone size={14} /><span className="hidden sm:inline">WhatsApp</span></button>}
+            <button onClick={() => setPanelCorreo(!panelCorreo)} className={`p-2 sm:px-3 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer ${panelCorreo ? 'bg-blue-600 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-200'}`} title="Enviar por correo con el PDF adjunto"><Mail size={14} /><span className="hidden sm:inline">Correo</span></button>
+            <button onClick={descargarPDF} disabled={!!ocupado} className="p-2 sm:px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer disabled:opacity-50" title="Descargar como archivo PDF"><Download size={14} className={ocupado === 'pdf' ? 'animate-bounce' : ''} /><span className="hidden sm:inline">{ocupado === 'pdf' ? 'Generando…' : 'PDF'}</span></button>
+            {puedeCompartirArchivos() && <button onClick={compartir} disabled={!!ocupado} className="p-2 sm:px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer disabled:opacity-50" title="Compartir el PDF (WhatsApp, correo…)"><Share2 size={14} /><span className="hidden sm:inline">Compartir</span></button>}
+            {project && !firma && (project.estado === 'Enviado' || project.estado === 'Borrador') && onAceptarFirmar && (
+              <button onClick={() => onAceptarFirmar(project)} className="p-2 sm:px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-xl flex items-center gap-1.5 cursor-pointer"><PenTool size={14} /><span>Aceptar aquí</span></button>
+            )}
+            {invoice && onRectificar && invoice.verifactu?.cadena && invoice.estado !== 'Anulada' && invoice.estado !== 'Rectificada' && (
+              <button onClick={() => onRectificar(invoice)} className="p-2 sm:px-3 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer" title="Emitir una factura rectificativa con estos mismos conceptos"><RefreshCcw size={14} /><span className="hidden sm:inline">Rectificar</span></button>
+            )}
+            <button onClick={() => window.print()} className="p-2 sm:px-3.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer" title="Imprimir o guardar como PDF"><Printer size={14} /><span className="hidden sm:inline">Imprimir / PDF</span></button>
+            {onClose && <button onClick={onClose} title="Cerrar" aria-label="Cerrar" className="w-8 h-8 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"><X size={18} /></button>}
+          </div>
+        </div>
+
+        {panelCorreo && (
+          <div className="bg-slate-900 border-b border-slate-800 p-4 text-xs text-slate-300 space-y-3 print:hidden">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div><label className="block font-bold text-slate-400 mb-1">Para</label><input value={correoPara} onChange={(e) => setCorreoPara(e.target.value)} placeholder="cliente@correo.es" className="w-full bg-slate-800 text-white rounded-xl px-3 py-2 border border-slate-700" /></div>
+              <div><label className="block font-bold text-slate-400 mb-1">Asunto</label><input value={correoAsunto} onChange={(e) => setCorreoAsunto(e.target.value)} className="w-full bg-slate-800 text-white rounded-xl px-3 py-2 border border-slate-700" /></div>
+            </div>
+            <div><label className="block font-bold text-slate-400 mb-1">Mensaje</label><textarea value={correoCuerpo} onChange={(e) => setCorreoCuerpo(e.target.value)} rows={5} className="w-full bg-slate-800 text-white rounded-xl px-3 py-2 border border-slate-700 font-sans" /></div>
+            <div className="flex flex-wrap items-center gap-2">
+              {firebaseDisponible && <button onClick={enviarGmail} disabled={!!ocupado} className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black flex items-center gap-2 cursor-pointer disabled:opacity-50"><Send size={14} className={ocupado === 'gmail' ? 'animate-pulse' : ''} /> {ocupado === 'gmail' ? 'Generando el PDF y enviando…' : 'Enviar desde mi Gmail con el PDF adjunto'}</button>}
+              {puedeCompartirArchivos() && <button onClick={compartir} disabled={!!ocupado} className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center gap-2 cursor-pointer disabled:opacity-50"><Share2 size={14} /> Compartir el PDF (WhatsApp, Gmail…)</button>}
+              <button onClick={abrirProgramaCorreo} disabled={!!ocupado} className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-bold flex items-center gap-2 cursor-pointer disabled:opacity-50"><Mail size={14} /> Descargar el PDF y abrir mi programa de correo</button>
+            </div>
+            {avisoCorreo && <div className={`p-3 rounded-xl border flex items-start gap-2 ${avisoCorreo.ok ? 'bg-emerald-900/40 border-emerald-700 text-emerald-200' : 'bg-rose-900/40 border-rose-700 text-rose-200'}`}>{avisoCorreo.ok ? <CheckCircle2 size={15} className="shrink-0 mt-0.5" /> : <AlertCircle size={15} className="shrink-0 mt-0.5" />}<span>{avisoCorreo.texto}</span></div>}
+            <p className="text-[10px] text-slate-500">El envío desde Gmail usa tu propia cuenta de Google (pide permiso la primera vez; dura una hora) y el correo queda en tus Enviados. El PDF se genera con la plantilla y el color que ves aquí.</p>
+          </div>
+        )}
+
+        {/* Documento */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-8 flex justify-center bg-slate-200/80 print:p-0 print:bg-white print:overflow-visible">
+          {documento}
         </div>
       </div>
     </div>

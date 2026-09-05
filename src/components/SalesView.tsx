@@ -18,7 +18,6 @@ interface Props {
   onCreateInvoice: (inv: Invoice, opciones?: { serie?: 'factura' | 'rectificativa'; original?: Invoice }) => void;
   onUpdateInvoiceStatus: (id: string, estado: Invoice['estado']) => void;
   onUpdateInvoice: (id: string, campos: Partial<Invoice>) => void;
-  onDeleteInvoice: (id: string) => void;
   showNewInvoiceModal: boolean;
   setShowNewInvoiceModal: (v: boolean) => void;
   preselectedProject?: Project | null;
@@ -27,7 +26,7 @@ interface Props {
 
 type LineaForm = { id: string; concepto: string; cantidad: number; unidad: string; precioUnitario: number; ivaPorcentaje: number; materialesVisibles?: InvoiceLine['materialesVisibles'] };
 
-export const SalesView: React.FC<Props> = ({ invoices, clients, projects, companySettings, siguienteNumero, siguienteNumeroRectificativa, onCreateInvoice, onUpdateInvoiceStatus, onUpdateInvoice, onDeleteInvoice, showNewInvoiceModal, setShowNewInvoiceModal, preselectedProject, onAviso }) => {
+export const SalesView: React.FC<Props> = ({ invoices, clients, projects, companySettings, siguienteNumero, siguienteNumeroRectificativa, onCreateInvoice, onUpdateInvoiceStatus, onUpdateInvoice, showNewInvoiceModal, setShowNewInvoiceModal, preselectedProject, onAviso }) => {
   const [periodo, setPeriodo] = useState<PeriodoFiltro>(periodoActual());
   const [busqueda, setBusqueda] = useState('');
   const [estadoFiltro, setEstadoFiltro] = useState('todos');
@@ -35,7 +34,6 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
   const [verVerifactu, setVerVerifactu] = useState<Invoice | null>(null);
   const [whatsapp, setWhatsapp] = useState<Invoice | null>(null);
   const [copiado, setCopiado] = useState(false);
-  const [aBorrar, setABorrar] = useState<Invoice | null>(null);
   const [aAnular, setAAnular] = useState<Invoice | null>(null);
   const [verificacion, setVerificacion] = useState<{ ok: boolean; errores: string[] } | null>(null);
   const [algoritmoOk, setAlgoritmoOk] = useState<boolean | null>(null);
@@ -278,10 +276,6 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
   const registradas = invoices.filter((i) => i.verifactu?.registrada && i.verifactu.cadena).length;
   const pendientesEnvio = invoices.filter((i) => i.verifactu?.registrada && i.verifactu.estadoEnvio === 'pendiente').length;
 
-  const esUltimaDeCadena = (inv: Invoice) => {
-    const reg = invoices.filter((i) => i.verifactu?.registrada && i.verifactu.cadena).sort((a, b) => a.verifactu.fechaHoraHuso.localeCompare(b.verifactu.fechaHoraHuso));
-    return !inv.verifactu?.cadena || (reg.length > 0 && reg[reg.length - 1].id === inv.id);
-  };
 
   const mensajeWhatsApp = (inv: Invoice) => `Hola ${inv.clienteNombre}, le enviamos la factura ${inv.numero} por ${formatCurrency(inv.total)} (IVA incluido)${inv.obraNombre ? ` correspondiente a "${inv.obraNombre}"` : ''}.\nForma de pago: ${inv.metodoPago}${companySettings.ibanPrincipal ? `\nIBAN: ${companySettings.ibanPrincipal}` : ''}\nVencimiento: ${formatDate(inv.fechaVencimiento)}\n\nGracias por su confianza.\n${companySettings.nombreComercial || companySettings.razonSocial}`;
 
@@ -293,7 +287,7 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3"><BadgeEuro className="text-blue-600" size={28} /> Facturas</h1>
-          <p className="text-slate-500 text-sm mt-1">Numeración correlativa, huella SHA-256 encadenada y QR de cotejo conforme al RD 1007/2023 · {etiquetaPeriodo(periodo)}</p>
+          <p className="text-slate-500 text-sm mt-1">Numeración correlativa, huella SHA-256 encadenada y QR de cotejo conforme al RD 1007/2023. Una factura emitida no se borra: se anula o se rectifica. Una factura emitida no se borra: se anula o se rectifica. Una factura emitida no se borra: se anula o se rectifica · {etiquetaPeriodo(periodo)}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <PeriodFilter value={periodo} onChange={setPeriodo} anios={anios} totalFiltrado={filtradas.length} totalGlobal={invoices.filter((i) => estadoFiltro === 'todos' || i.estado === estadoFiltro).length} />
@@ -364,7 +358,6 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
                           {inv.verifactu?.cadena && inv.estado !== 'Anulada' && inv.estado !== 'Rectificada' && <button onClick={() => abrirRectificar(inv)} className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg cursor-pointer" title="Emitir factura rectificativa (R1-R4)"><RefreshCcw size={16} /></button>}
                           <button onClick={() => setVerPDF(inv)} className="p-2 hover:text-slate-900 hover:bg-slate-100 rounded-lg cursor-pointer" title="Ver / imprimir"><Eye size={16} /></button>
                           {inv.estado !== 'Anulada' && inv.estado !== 'Rectificada' && inv.verifactu?.cadena && <button onClick={() => setAAnular(inv)} className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg cursor-pointer" title="Anular (registro de anulación)"><Ban size={16} /></button>}
-                          {esUltimaDeCadena(inv) && <button onClick={() => setABorrar(inv)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer" title="Eliminar (solo la última de la cadena)"><Trash2 size={16} /></button>}
                         </div>
                       </td>
                     </tr>
@@ -376,7 +369,7 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
         )}
       </div>
 
-      {verPDF && <DocumentRenderer tipo="f" doc={invoices.find((i) => i.id === verPDF.id) || verPDF} companySettings={companySettings} client={clients.find((c) => c.id === verPDF.clienteId)} abrirCorreo={verPDFCorreo} onClose={() => { setVerPDF(null); setVerPDFCorreo(false); }} onSendWhatsApp={(d) => { setVerPDF(null); setWhatsapp(d as Invoice); }} onCorreoEnviado={(canal) => onAviso?.(`Factura ${verPDF.numero} enviada por correo (${canal}).`, 'ok')} onCambiarPlantilla={(id) => onUpdateInvoice(verPDF.id, { plantillaFactura: id })} />}
+      {verPDF && <DocumentRenderer tipo="f" doc={invoices.find((i) => i.id === verPDF.id) || verPDF} companySettings={companySettings} client={clients.find((c) => c.id === verPDF.clienteId)} abrirCorreo={verPDFCorreo} onRectificar={(inv) => { setVerPDF(null); setVerPDFCorreo(false); abrirRectificar(inv as Invoice); }} onClose={() => { setVerPDF(null); setVerPDFCorreo(false); }} onSendWhatsApp={(d) => { setVerPDF(null); setWhatsapp(d as Invoice); }} onCorreoEnviado={(canal) => onAviso?.(`Factura ${verPDF.numero} enviada por correo (${canal}).`, 'ok')} onCambiarPlantilla={(id) => onUpdateInvoice(verPDF.id, { plantillaFactura: id })} />}
 
       {/* REGISTRO VERIFACTU */}
       {verVerifactu && (
@@ -568,16 +561,6 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
         </div>
       )}
 
-      {aBorrar && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mb-4"><Trash2 size={24} /></div>
-            <h3 className="text-base font-black text-slate-900">¿Eliminar {aBorrar.numero}?</h3>
-            <p className="text-xs text-slate-500 mt-1.5">Solo se permite borrar la última factura de la cadena (o las de ejemplo). Si ya la entregaste al cliente o a la gestoría, anúlala en lugar de borrarla.</p>
-            <div className="mt-6 flex justify-end gap-3"><button onClick={() => setABorrar(null)} className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer">Cancelar</button><button onClick={() => { onDeleteInvoice(aBorrar.id); setABorrar(null); }} className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl cursor-pointer">Eliminar</button></div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
