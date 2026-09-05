@@ -1,0 +1,38 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function autenticado() { return request.auth != null; }
+    function esPropietario(userId) { return autenticado() && request.auth.uid == userId; }
+
+    // Datos de cada usuario: solo él los lee y escribe (estado principal y copias de seguridad)
+    match /users/{userId} {
+      allow read, write: if esPropietario(userId);
+    }
+    match /users/{userId}/{coleccion}/{docId} {
+      allow read, write: if esPropietario(userId);
+    }
+
+    // Propuestas públicas: el instalador (autenticado) las publica; cualquiera con el enlace
+    // (token aleatorio de 24 caracteres) puede leerla y crear UNA aceptación. Nadie puede
+    // leer las aceptaciones salvo el propietario de la propuesta.
+    match /propuestas/{token} {
+      allow read: if true;
+      allow create: if autenticado() && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if autenticado() && resource.data.ownerUid == request.auth.uid;
+
+      match /aceptaciones/{id} {
+        allow create: if request.resource.data.keys().hasAll(['firmadoPor', 'dni', 'fechaFirma', 'codigoAceptacion'])
+                      && request.resource.data.firmadoPor is string && request.resource.data.firmadoPor.size() <= 200
+                      && request.resource.data.dni is string && request.resource.data.dni.size() <= 20
+                      && (!('trazoFirma' in request.resource.data) || request.resource.data.trazoFirma.size() <= 300000);
+        allow read: if autenticado() && get(/databases/$(database)/documents/propuestas/$(token)).data.ownerUid == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
+    // Todo lo demás, denegado
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

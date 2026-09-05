@@ -1,0 +1,8 @@
+{
+  "name": "Control de Obra",
+  "description": "Gestión para instaladores eléctricos y de recarga VE: presupuestos con aceptación desde el móvil del cliente, obras, agenda con Google Calendar, facturas VERI*FACTU, gastos, banco, rentabilidad y trimestre fiscal. Datos en el dispositivo y en la nube de la cuenta de Google del usuario.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": []
+}

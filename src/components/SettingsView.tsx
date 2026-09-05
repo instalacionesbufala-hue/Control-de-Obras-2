@@ -1,0 +1,376 @@
+import React, { useRef, useState } from 'react';
+import { Settings, ShieldCheck, Building2, CheckCircle2, Save, Image, LayoutTemplate, Palette, Upload, Trash2, Plus, RefreshCw, AlertTriangle, Cloud, Link as LinkIcon, X, UserCheck, HardHat, Download, Database, Hash, FileText, CalendarDays, Info } from 'lucide-react';
+import { CompanySettings, DocumentTemplate, AppState } from '../types';
+import { DEFAULT_TEMPLATES } from '../data/plantillas';
+import { loginWithGoogle, logoutGoogleUser, guardarCopiaEnNube, cargarUltimaCopiaNube, tamanoDocumentoKB, LIMITE_FIRESTORE_KB } from '../lib/cloudSync';
+import { exportarCopia, importarCopia, leerCopiaAnterior, tamanoEstadoKB } from '../lib/storage';
+import { firebaseDisponible } from '../lib/firebase';
+import { pedirPermisoGoogle, tieneToken, SCOPE_CALENDAR, SCOPE_GMAIL } from '../lib/googleToken';
+import { TEMPLATE_OPTIONS, FONT_OPTIONS } from './DocumentRenderer';
+import { numeroDocumento } from '../utils/formatters';
+import { fechaHoraES } from '../utils/dates';
+
+interface Props {
+  companySettings: CompanySettings;
+  onSaveSettings: (s: CompanySettings) => void;
+  onDeleteExamples: () => void;
+  onCargarEjemplos: () => void;
+  hayDemo: boolean;
+  estadoCompleto: AppState;
+  onRestaurarEstado: (st: AppState) => void;
+  firebaseUser: any;
+  estadoNube: string;
+  errorNube: string | null;
+  onAviso?: (texto: string, tipo?: 'ok' | 'error' | 'info') => void;
+}
+
+export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings, onDeleteExamples, onCargarEjemplos, hayDemo, estadoCompleto, onRestaurarEstado, firebaseUser, estadoNube, errorNube, onAviso }) => {
+  const [f, setF] = useState<CompanySettings>({ ...companySettings, plantillasPersonalizadas: companySettings.plantillasPersonalizadas?.length ? companySettings.plantillasPersonalizadas : DEFAULT_TEMPLATES });
+  const [guardado, setGuardado] = useState(false);
+  const [editTpl, setEditTpl] = useState<DocumentTemplate | null>(null);
+  const [nuevaTpl, setNuevaTpl] = useState(false);
+  const [nuevoTecnico, setNuevoTecnico] = useState('');
+  const [ocupado, setOcupado] = useState<string | null>(null);
+  const [confirmarRestaurar, setConfirmarRestaurar] = useState<{ st: AppState; origen: string } | null>(null);
+  const logoRef = useRef<HTMLInputElement>(null);
+  const certRef = useRef<HTMLInputElement>(null);
+  const copiaRef = useRef<HTMLInputElement>(null);
+
+  const autonomo = f.tipoEntidad === 'autonomo';
+  const set = <K extends keyof CompanySettings>(k: K, v: CompanySettings[K]) => setF((p) => ({ ...p, [k]: v }));
+
+  const guardar = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    onSaveSettings(f);
+    setGuardado(true);
+    setTimeout(() => setGuardado(false), 2500);
+  };
+
+  const subirLogo = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    if (file.size > 300 * 1024) return alert('El logotipo debe pesar menos de 300 KB (se guarda dentro de la app y viaja a la nube con cada cambio).');
+    const r = new FileReader();
+    r.onload = () => set('logoUrl', r.result as string);
+    r.readAsDataURL(file);
+  };
+  const subirCert = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Solo se anota qué certificado se usará; el archivo .p12 no se guarda en el navegador
+    const buf = await file.arrayBuffer();
+    const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', buf))).map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(':').substring(0, 59);
+    setF((p) => ({ ...p, verifactuCertificado: { ...p.verifactuCertificado, instalado: false, archivoNombre: file.name, huellaSHA256: hash, nombreTitular: p.verifactuCertificado.nombreTitular || p.razonSocial } }));
+    e.target.value = '';
+  };
+
+  const vincularGoogle = async () => {
+    if (!firebaseDisponible) return onAviso?.('Firebase no está configurado en esta instalación.', 'error');
+    setOcupado('google');
+    try {
+      const u = await loginWithGoogle();
+      if (u) {
+        const nuevo = { ...f, googleCalendarConectado: true, googleAccountEmail: u.email || '', email: f.email || u.email || '', nombreUsuario: f.nombreUsuario || u.displayName || '' };
+        setF(nuevo);
+        onSaveSettings(nuevo);
+        onAviso?.(`Cuenta ${u.email} vinculada. Los datos se sincronizan con la nube.`, 'ok');
+      }
+    } catch (e: any) {
+      onAviso?.(e?.code === 'auth/popup-closed-by-user' ? 'Ventana de Google cerrada sin iniciar sesión.' : `No se pudo iniciar sesión: ${e?.message || e}`, 'error');
+    } finally {
+      setOcupado(null);
+    }
+  };
+  const desvincular = async () => {
+    setOcupado('google');
+    try {
+      await logoutGoogleUser();
+    } catch {
+      // ignorar
+    }
+    const nuevo = { ...f, googleCalendarConectado: false };
+    setF(nuevo);
+    onSaveSettings(nuevo);
+    setOcupado(null);
+    onAviso?.('Sesión de Google cerrada. Los datos siguen guardados en este dispositivo.', 'info');
+  };
+  const permisoCalendar = async () => {
+    setOcupado('calendar');
+    try {
+      const t = await pedirPermisoGoogle();
+      onAviso?.(`Permiso de Google Calendar y Gmail concedido para ${t.email || 'tu cuenta'} (válido una hora).`, 'ok');
+    } catch (e: any) {
+      onAviso?.(e?.message || 'No se concedió el permiso.', 'error');
+    } finally {
+      setOcupado(null);
+    }
+  };
+
+  const copiaLocal = () => {
+    const nombre = exportarCopia(estadoCompleto);
+    const nuevo = { ...f, copias: { ...(f.copias || {}), ultimaLocal: new Date().toISOString() } };
+    setF(nuevo);
+    onSaveSettings(nuevo);
+    onAviso?.(`Copia descargada: ${nombre}`, 'ok');
+  };
+  const importar = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const st = await importarCopia(file);
+      setConfirmarRestaurar({ st, origen: file.name });
+    } catch (err: any) {
+      onAviso?.(err?.message || 'Archivo no válido.', 'error');
+    }
+    e.target.value = '';
+  };
+  const copiaNube = async () => {
+    if (!firebaseUser) return onAviso?.('Vincula tu cuenta de Google para guardar copias en la nube.', 'error');
+    setOcupado('nube');
+    try {
+      const r = await guardarCopiaEnNube(firebaseUser.uid, estadoCompleto, 'Copia manual desde Configuración');
+      const nuevo = { ...f, copias: { ...(f.copias || {}), ultimaNube: r.fecha } };
+      setF(nuevo);
+      onSaveSettings(nuevo);
+      onAviso?.('Copia guardada en la nube de tu cuenta.', 'ok');
+    } catch (e: any) {
+      onAviso?.(`No se pudo guardar la copia: ${e?.message || e}`, 'error');
+    } finally {
+      setOcupado(null);
+    }
+  };
+  const restaurarNube = async () => {
+    if (!firebaseUser) return;
+    setOcupado('nube');
+    try {
+      const r = await cargarUltimaCopiaNube(firebaseUser.uid);
+      if (!r) onAviso?.('No hay ninguna copia manual en la nube todavía.', 'info');
+      else setConfirmarRestaurar({ st: r.estado, origen: `copia en la nube del ${fechaHoraES(r.fecha?.replace('Z', '') || '')}` });
+    } finally {
+      setOcupado(null);
+    }
+  };
+  const restaurarAnterior = () => {
+    const st = leerCopiaAnterior();
+    if (!st) return onAviso?.('No hay una versión anterior guardada en este navegador.', 'info');
+    setConfirmarRestaurar({ st, origen: `versión anterior de este dispositivo (${fechaHoraES(st.updatedAt.replace('Z', ''))})` });
+  };
+
+  const plantillas = f.plantillasPersonalizadas || DEFAULT_TEMPLATES;
+  const guardarTpl = (t: DocumentTemplate) => {
+    set('plantillasPersonalizadas', nuevaTpl ? [...plantillas, t] : plantillas.map((x) => (x.id === t.id ? t : x)));
+    setEditTpl(null);
+  };
+  const borrarTpl = (id: string) => {
+    if (plantillas.length <= 1) return alert('Debe quedar al menos una plantilla.');
+    const resto = plantillas.filter((t) => t.id !== id);
+    set('plantillasPersonalizadas', resto);
+    if (f.plantillaPorDefecto === id) set('plantillaPorDefecto', resto[0].id);
+  };
+
+  const kb = tamanoEstadoKB(estadoCompleto);
+  const kbNube = tamanoDocumentoKB(estadoCompleto);
+
+  return (
+    <div className="p-6 md:p-8 space-y-6 max-w-5xl mx-auto">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div><h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3"><Settings className="text-slate-700" size={28} /> Configuración</h1><p className="text-slate-500 text-sm mt-1">Datos de la empresa, numeración, plantillas, técnicos, Google, copias de seguridad y datos de ejemplo</p></div>
+        <button onClick={() => guardar()} className="bg-blue-600 hover:bg-blue-700 text-white text-xs md:text-sm font-bold px-5 py-2.5 rounded-2xl shadow-md flex items-center gap-2 cursor-pointer self-start"><Save size={16} /> {guardado ? 'Guardado' : 'Guardar cambios'}</button>
+      </div>
+      {guardado && <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-3 text-emerald-800 text-xs font-bold"><CheckCircle2 size={18} className="text-emerald-600" /> Configuración guardada.</div>}
+
+      <form onSubmit={guardar} className="space-y-6">
+        {/* 1. ENTIDAD Y DATOS FISCALES */}
+        <Seccion icono={<Building2 size={22} />} color="blue" titulo="Tu empresa o tu actividad como autónomo" sub="Estos datos se imprimen en presupuestos y facturas y deciden qué modelos de Hacienda te corresponden">
+          <div className="grid grid-cols-2 gap-2 mb-4">
+            <button type="button" onClick={() => set('tipoEntidad', 'empresa')} className={`p-3.5 rounded-2xl border-2 text-left cursor-pointer ${!autonomo ? 'border-blue-600 bg-blue-50/50' : 'border-slate-200 hover:border-slate-300'}`}><div className="flex items-center gap-2 font-black text-slate-900 text-sm"><Building2 size={16} className="text-blue-600" /> Empresa (S.L., S.L.U., S.A.)</div><p className="text-[11px] text-slate-500 mt-1">Impuesto sobre Sociedades (200/202), IVA 303, retenciones 111/115 si aplican.</p></button>
+            <button type="button" onClick={() => set('tipoEntidad', 'autonomo')} className={`p-3.5 rounded-2xl border-2 text-left cursor-pointer ${autonomo ? 'border-emerald-600 bg-emerald-50/50' : 'border-slate-200 hover:border-slate-300'}`}><div className="flex items-center gap-2 font-black text-slate-900 text-sm"><UserCheck size={16} className="text-emerald-600" /> Autónomo (persona física)</div><p className="text-[11px] text-slate-500 mt-1">IRPF 130 y Renta, IVA 303, retención en tus facturas a empresas.</p></button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Campo label={autonomo ? 'Nombre y apellidos *' : 'Razón social *'} value={f.razonSocial} onChange={(v) => set('razonSocial', v)} bold />
+            <Campo label={autonomo ? 'NIF *' : 'CIF *'} value={f.cif} onChange={(v) => set('cif', v.toUpperCase())} mono />
+            <Campo label="Nombre comercial (marca)" value={f.nombreComercial} onChange={(v) => set('nombreComercial', v)} />
+            <Campo label="Epígrafe IAE / actividad" value={f.epigrafeIAE} onChange={(v) => set('epigrafeIAE', v)} placeholder="Ej.: 504.1 Instalaciones eléctricas" />
+            <div className="md:col-span-2"><Campo label="Dirección fiscal" value={f.direccion} onChange={(v) => set('direccion', v)} /></div>
+            <div className="grid grid-cols-3 gap-2"><Campo label="C. P." value={f.codigoPostal} onChange={(v) => set('codigoPostal', v)} /><div className="col-span-2"><Campo label="Ciudad" value={f.ciudad} onChange={(v) => set('ciudad', v)} /></div></div>
+            <Campo label="Provincia" value={f.provincia || ''} onChange={(v) => set('provincia', v)} />
+            <Campo label="Teléfono" value={f.telefono} onChange={(v) => set('telefono', v)} />
+            <Campo label="Email" value={f.email} onChange={(v) => set('email', v)} />
+            <Campo label="Web" value={f.web} onChange={(v) => set('web', v)} />
+            <Campo label="Nombre del responsable (aparece en la bitácora)" value={f.nombreUsuario || ''} onChange={(v) => set('nombreUsuario', v)} />
+            <Campo label="IBAN para cobros" value={f.ibanPrincipal} onChange={(v) => set('ibanPrincipal', v)} mono />
+            <Campo label="Banco" value={f.bancoNombre} onChange={(v) => set('bancoNombre', v)} />
+            {!autonomo && <div className="md:col-span-2"><Campo label="Datos registrales (Registro Mercantil)" value={f.registroMercantil} onChange={(v) => set('registroMercantil', v)} placeholder="Inscrita en el Registro Mercantil de …, tomo …, folio …, hoja …" /></div>}
+          </div>
+          <div className="mt-4 p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+            <p className="text-xs font-black text-slate-800">Situación fiscal (decide los modelos que se muestran)</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+              {autonomo && <label className="flex items-center gap-2 p-2.5 bg-white rounded-xl border border-slate-200 cursor-pointer"><input type="checkbox" checked={!!f.aplicaRetencionIrpf} onChange={(e) => set('aplicaRetencionIrpf', e.target.checked)} className="rounded" /><span>Aplico retención de IRPF en facturas a empresas</span><select value={f.retencionIrpfPorcentaje || 15} onChange={(e) => set('retencionIrpfPorcentaje', Number(e.target.value))} className="ml-auto border border-slate-200 rounded-lg px-2 py-1 bg-white"><option value={7}>7 %</option><option value={15}>15 %</option></select></label>}
+              <label className="flex items-center gap-2 p-2.5 bg-white rounded-xl border border-slate-200 cursor-pointer"><input type="checkbox" checked={!!f.tieneEmpleados} onChange={(e) => set('tieneEmpleados', e.target.checked)} className="rounded" /><span>Tengo empleados o retengo a profesionales (modelos 111 y 190)</span></label>
+              <label className="flex items-center gap-2 p-2.5 bg-white rounded-xl border border-slate-200 cursor-pointer"><input type="checkbox" checked={!!f.pagaAlquiler} onChange={(e) => set('pagaAlquiler', e.target.checked)} className="rounded" /><span>Pago alquiler de local con retención (modelos 115 y 180)</span></label>
+              <label className="flex items-center gap-2 p-2.5 bg-white rounded-xl border border-slate-200 cursor-pointer"><input type="checkbox" checked={!!f.operacionesIntracomunitarias} onChange={(e) => set('operacionesIntracomunitarias', e.target.checked)} className="rounded" /><span>Compro o vendo a empresas de la UE (modelo 349)</span></label>
+            </div>
+          </div>
+        </Seccion>
+
+        {/* 2. LOGO */}
+        <Seccion icono={<Image size={22} />} color="blue" titulo="Logotipo" sub="Aparece en el menú, los presupuestos y las facturas">
+          <div className="flex flex-col md:flex-row items-center gap-6">
+            <div className="w-32 h-32 rounded-2xl bg-slate-50 border-2 border-dashed border-slate-300 flex items-center justify-center overflow-hidden shrink-0 p-2">{f.logoUrl ? <img src={f.logoUrl} alt="Logo" className="w-full h-full object-contain" /> : <Image size={32} className="text-slate-300" />}</div>
+            <div className="space-y-2 flex-1"><input type="file" ref={logoRef} accept="image/*" onChange={subirLogo} className="hidden" /><div className="flex gap-2 flex-wrap"><button type="button" onClick={() => logoRef.current?.click()} className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer"><Upload size={15} /> Elegir imagen (PNG, JPG, SVG, máx. 300 KB)</button>{f.logoUrl && <button type="button" onClick={() => set('logoUrl', '')} className="px-3 py-2.5 text-rose-600 font-bold text-xs flex items-center gap-1 cursor-pointer"><Trash2 size={13} /> Quitar</button>}</div><p className="text-[11px] text-slate-500">Consejo: un PNG con fondo transparente de unos 600 px de ancho se ve bien en pantalla y en papel.</p></div>
+          </div>
+        </Seccion>
+
+        {/* 3. NUMERACIÓN Y DOCUMENTOS */}
+        <Seccion icono={<Hash size={22} />} color="indigo" titulo="Numeración y textos de los documentos" sub="Escribe {AAAA} donde quieras que aparezca el año. Las facturas deben ser correlativas dentro de cada serie.">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
+            {([['prefijoPresupuestos', 'siguienteNumeroPresupuesto', 'Presupuestos'], ['prefijoObras', 'siguienteNumeroObra', 'Obras'], ['prefijoFacturas', 'siguienteNumeroFactura', 'Facturas'], ['prefijoRectificativas', 'siguienteNumeroRectificativa', 'Rectificativas']] as Array<[keyof CompanySettings, keyof CompanySettings, string]>).map(([pk, nk, label]) => (
+              <div key={label} className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                <p className="font-black text-slate-800">{label}</p>
+                <div className="flex gap-2"><input value={f[pk] as string} onChange={(e) => set(pk, e.target.value as any)} className="flex-1 border border-slate-200 rounded-xl px-3 py-2 font-mono" /><input type="number" min={1} value={f[nk] as number} onChange={(e) => set(nk, Number(e.target.value) as any)} className="w-20 border border-slate-200 rounded-xl px-2 py-2 font-mono text-center" /></div>
+                <p className="text-[11px] text-slate-500">Siguiente: <strong className="font-mono">{numeroDocumento(f[pk] as string, f[nk] as number)}</strong></p>
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 text-xs">
+            <div><label className="block font-bold text-slate-700 mb-1">Comentario al pie de los presupuestos (por defecto)</label><textarea value={f.notaFinalPresupuestoDefecto} onChange={(e) => set('notaFinalPresupuestoDefecto', e.target.value)} rows={4} className="w-full border border-slate-200 rounded-xl px-3 py-2" /><p className="text-[10px] text-slate-400 mt-1">Forma de pago, validez, garantía… Se puede cambiar en cada presupuesto y en cada plantilla.</p></div>
+            <div className="space-y-3"><div><label className="block font-bold text-slate-700 mb-1">Condiciones al pie de las facturas</label><textarea value={f.condicionesPagoDefecto} onChange={(e) => set('condicionesPagoDefecto', e.target.value)} rows={2} className="w-full border border-slate-200 rounded-xl px-3 py-2" /></div><div className="grid grid-cols-2 gap-2"><Campo label="Validez del presupuesto (días)" value={String(f.diasValidezPresupuesto)} onChange={(v) => set('diasValidezPresupuesto', Number(v) || 30)} /><Campo label="Vencimiento facturas (días)" value={String(f.diasVencimientoFactura)} onChange={(v) => set('diasVencimientoFactura', Number(v) || 30)} /></div></div>
+          </div>
+        </Seccion>
+
+        {/* 4. TÉCNICOS Y FRANJAS */}
+        <Seccion icono={<HardHat size={22} />} color="amber" titulo="Técnicos y franjas horarias" sub="Para asignar citas y calcular los huecos libres que se proponen al cliente">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div className="space-y-2">
+              <p className="font-bold text-slate-700">Técnicos</p>
+              <div className="flex flex-wrap gap-2">{(f.tecnicos || []).map((t) => <span key={t} className="px-3 py-1.5 bg-slate-100 rounded-xl font-bold text-slate-700 flex items-center gap-1.5">{t}<button type="button" onClick={() => set('tecnicos', f.tecnicos.filter((x) => x !== t))} className="text-slate-400 hover:text-rose-600 cursor-pointer"><X size={12} /></button></span>)}{(f.tecnicos || []).length === 0 && <span className="text-slate-400">Sin técnicos: se usará tu nombre.</span>}</div>
+              <div className="flex gap-2"><input value={nuevoTecnico} onChange={(e) => setNuevoTecnico(e.target.value)} placeholder="Nombre del técnico" className="flex-1 border border-slate-200 rounded-xl px-3 py-2" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (nuevoTecnico.trim()) { set('tecnicos', [...(f.tecnicos || []), nuevoTecnico.trim()]); setNuevoTecnico(''); } } }} /><button type="button" onClick={() => { if (nuevoTecnico.trim()) { set('tecnicos', [...(f.tecnicos || []), nuevoTecnico.trim()]); setNuevoTecnico(''); } }} className="px-3 py-2 bg-slate-900 text-white rounded-xl font-bold cursor-pointer"><Plus size={14} /></button></div>
+            </div>
+            <div className="space-y-2">
+              <p className="font-bold text-slate-700">Franjas para las citas</p>
+              {(['manana', 'tarde'] as const).map((k) => <div key={k} className="flex items-center gap-2"><span className="w-16 font-bold text-slate-600">{k === 'manana' ? 'Mañana' : 'Tarde'}</span><input type="time" value={f.franjas[k].inicio} onChange={(e) => set('franjas', { ...f.franjas, [k]: { ...f.franjas[k], inicio: e.target.value } })} className="border border-slate-200 rounded-xl px-2 py-1.5" /><span>a</span><input type="time" value={f.franjas[k].fin} onChange={(e) => set('franjas', { ...f.franjas, [k]: { ...f.franjas[k], fin: e.target.value } })} className="border border-slate-200 rounded-xl px-2 py-1.5" /></div>)}
+              <p className="text-[10px] text-slate-400">Los huecos libres se calculan de lunes a viernes con estas dos franjas, descartando las que ya tienen cita.</p>
+            </div>
+          </div>
+        </Seccion>
+
+        {/* 5. PLANTILLAS */}
+        <Seccion icono={<LayoutTemplate size={22} />} color="indigo" titulo="Plantillas de presupuesto y factura" sub="Color, tipografía, maquetación y textos de pie. La zona fiscal de la factura (identificación, totales, QR y leyenda VERI*FACTU) no se puede ocultar." accion={<button type="button" onClick={() => { setNuevaTpl(true); setEditTpl({ id: `tpl-${Date.now()}`, nombre: 'Nueva plantilla', descripcion: '', colorPrimario: '', acento: '#1D4ED8', base: 'moderna', fuente: 'sans', condicionesPago: f.condicionesPagoDefecto, notaFinal: f.notaFinalPresupuestoDefecto, pieDePagina: '', esPersonalizada: true }); }} className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer"><Plus size={14} /> Nueva plantilla</button>}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {plantillas.map((t) => {
+              const sel = f.plantillaPorDefecto === t.id;
+              return (
+                <div key={t.id} onClick={() => set('plantillaPorDefecto', t.id)} className={`p-4 rounded-2xl border-2 cursor-pointer ${sel ? 'border-blue-600 bg-blue-50/40' : 'border-slate-200/80 hover:border-slate-300'}`}>
+                  <div className="flex items-center justify-between"><div className="flex items-center gap-2"><div className="w-4 h-4 rounded-full border border-white shadow-xs" style={{ backgroundColor: t.acento }} /><span className="font-bold text-slate-900 text-sm">{t.nombre}</span></div>{sel && <span className="text-[10px] font-black uppercase bg-blue-600 text-white px-2 py-0.5 rounded-full">Por defecto</span>}</div>
+                  <p className="text-xs text-slate-500 mt-1">{t.descripcion || `${TEMPLATE_OPTIONS.find((o) => o.id === t.base)?.name || 'Moderna'} · ${FONT_OPTIONS.find((o) => o.id === t.fuente)?.name || 'Jakarta'}`}</p>
+                  {t.notaFinal && <p className="text-[11px] text-slate-400 mt-1 line-clamp-2 italic">“{t.notaFinal}”</p>}
+                  <div className="pt-3 mt-3 border-t border-slate-100 flex items-center justify-between text-xs"><button type="button" onClick={(e) => { e.stopPropagation(); setNuevaTpl(false); setEditTpl(t); }} className="text-slate-700 font-bold flex items-center gap-1 cursor-pointer"><Palette size={13} /> Editar</button>{plantillas.length > 1 && <button type="button" onClick={(e) => { e.stopPropagation(); if (confirm(`¿Eliminar la plantilla "${t.nombre}"?`)) borrarTpl(t.id); }} className="text-rose-500 cursor-pointer"><Trash2 size={13} /></button>}</div>
+                </div>
+              );
+            })}
+          </div>
+        </Seccion>
+
+        {/* 6. GOOGLE Y NUBE */}
+        <Seccion icono={<Cloud size={22} />} color="indigo" titulo="Cuenta de Google, nube y Google Calendar" sub="Opcional. Con la cuenta vinculada, los datos se guardan en la nube y se sincronizan en todos tus dispositivos en tiempo real.">
+          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3 text-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center font-black text-blue-600 shadow-xs">G</div><div><p className="font-bold text-slate-900">{firebaseUser ? `Vinculada: ${firebaseUser.email}` : 'Sin cuenta vinculada'}</p><p className="text-slate-500 text-[11px]">{firebaseUser ? (estadoNube === 'error' ? `Error de nube: ${errorNube}` : estadoNube === 'sincronizado' ? 'Datos sincronizados con la nube.' : 'Sincronizando…') : 'Los datos se guardan solo en este navegador.'}</p></div></div>
+              {firebaseUser ? <button type="button" onClick={desvincular} disabled={ocupado === 'google'} className="px-4 py-2 rounded-xl font-bold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 flex items-center gap-2 cursor-pointer"><LinkIcon size={13} /> Cerrar sesión</button> : <button type="button" onClick={vincularGoogle} disabled={ocupado === 'google' || !firebaseDisponible} className="px-4 py-2 rounded-xl font-bold bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-2 cursor-pointer disabled:opacity-50">{ocupado === 'google' ? <RefreshCw size={13} className="animate-spin" /> : <LinkIcon size={13} />} Vincular cuenta de Google</button>}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-2 border-t border-slate-200">
+              <div className="p-3 bg-white rounded-xl border border-slate-200"><p className="font-bold text-slate-800 flex items-center gap-1.5"><Database size={13} className="text-indigo-600" /> Nube</p><p className="text-[11px] text-slate-500 mt-1">Estado completo en Firestore de tu cuenta. Tamaño actual {kbNube} KB de {LIMITE_FIRESTORE_KB} KB{kbNube > LIMITE_FIRESTORE_KB * 0.8 ? ' · cerca del límite: reduce fotos incrustadas' : ''}.</p></div>
+              <div className="p-3 bg-white rounded-xl border border-slate-200"><p className="font-bold text-slate-800 flex items-center gap-1.5"><CalendarDays size={13} className="text-emerald-600" /> Google Calendar y Gmail</p><p className="text-[11px] text-slate-500 mt-1">{tieneToken(SCOPE_CALENDAR) && tieneToken(SCOPE_GMAIL) ? 'Permiso activo (una hora): citas en tu calendario y envío de PDF desde tu Gmail.' : 'Permiso no concedido aún. También se pide al guardar una cita o al enviar un correo.'}</p><button type="button" onClick={permisoCalendar} disabled={!firebaseDisponible || ocupado === 'calendar'} className="mt-1.5 px-2.5 py-1 bg-emerald-600 text-white rounded-lg font-bold text-[11px] cursor-pointer disabled:opacity-50">Conceder permiso</button><input value={f.googleCalendarId || 'primary'} onChange={(e) => set('googleCalendarId', e.target.value)} className="mt-1.5 w-full border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-mono" title="ID del calendario (primary = principal)" /></div>
+              <div className="p-3 bg-white rounded-xl border border-slate-200"><p className="font-bold text-slate-800 flex items-center gap-1.5"><Info size={13} className="text-slate-500" /> Aceptación desde el móvil del cliente</p><p className="text-[11px] text-slate-500 mt-1">Requiere la cuenta vinculada: el presupuesto se publica en la nube con un enlace único y la aceptación llega a la app al instante.</p></div>
+            </div>
+          </div>
+        </Seccion>
+
+        {/* 7. COPIAS */}
+        <Seccion icono={<Database size={22} />} color="emerald" titulo="Copias de seguridad" sub={`Todo lo que hay en la app ocupa ${kb} KB. Guarda una copia local (archivo) con regularidad, y otra en la nube si tienes Google vinculado.`}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+              <p className="font-black text-slate-900 flex items-center gap-1.5"><Download size={14} /> Copia local (archivo JSON)</p>
+              <p className="text-slate-500 text-[11px]">Se descarga a tu ordenador o móvil. Guárdala en tu Drive o disco. {f.copias?.ultimaLocal ? `Última: ${fechaHoraES(f.copias.ultimaLocal.replace('Z', ''))}.` : 'Aún no has hecho ninguna.'}</p>
+              <div className="flex gap-2 flex-wrap"><button type="button" onClick={copiaLocal} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold cursor-pointer">Descargar copia</button><input type="file" ref={copiaRef} accept=".json" className="hidden" onChange={importar} /><button type="button" onClick={() => copiaRef.current?.click()} className="px-3.5 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer">Restaurar desde archivo</button><button type="button" onClick={restaurarAnterior} className="px-3.5 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer" title="Versión guardada automáticamente antes de la última carga desde la nube o restauración">Versión anterior</button></div>
+            </div>
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+              <p className="font-black text-slate-900 flex items-center gap-1.5"><Cloud size={14} /> Copia en la nube</p>
+              <p className="text-slate-500 text-[11px]">Además de la sincronización continua, guarda una foto manual que puedes restaurar. {f.copias?.ultimaNube ? `Última: ${fechaHoraES(f.copias.ultimaNube.replace('Z', ''))}.` : firebaseUser ? 'Aún no has hecho ninguna.' : 'Requiere Google vinculado.'}</p>
+              <div className="flex gap-2 flex-wrap"><button type="button" onClick={copiaNube} disabled={!firebaseUser || ocupado === 'nube'} className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold cursor-pointer disabled:opacity-50">Guardar en la nube</button><button type="button" onClick={restaurarNube} disabled={!firebaseUser || ocupado === 'nube'} className="px-3.5 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer disabled:opacity-50">Restaurar de la nube</button></div>
+            </div>
+          </div>
+        </Seccion>
+
+        {/* 8. CERTIFICADO */}
+        <Seccion icono={<ShieldCheck size={24} />} color="emerald" titulo="Certificado digital y envío a la AEAT" sub="La huella y el QR se generan aquí. El envío de los registros a la AEAT exige firmar con el certificado en un servidor.">
+          <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 flex items-start gap-2"><AlertTriangle size={15} className="shrink-0 mt-0.5" /><span>No subas aquí tu certificado .p12: un navegador no puede custodiarlo con seguridad. Anota solo qué certificado usarás. La remisión a la AEAT se hace desde la versión con servidor o a través de tu gestoría; en cada factura puedes marcar "enviada" con el CSV que devuelve la AEAT. Obligatorio para sociedades desde el 1-1-2027 y para autónomos desde el 1-7-2027 (RDL 15/2025).</span></div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs mt-3">
+            <Campo label="Titular del certificado" value={f.verifactuCertificado.nombreTitular} onChange={(v) => set('verifactuCertificado', { ...f.verifactuCertificado, nombreTitular: v })} />
+            <Campo label="Emisor (FNMT, Camerfirma…)" value={f.verifactuCertificado.emisor} onChange={(v) => set('verifactuCertificado', { ...f.verifactuCertificado, emisor: v })} />
+            <Campo label="Caducidad" value={f.verifactuCertificado.caducidad} onChange={(v) => set('verifactuCertificado', { ...f.verifactuCertificado, caducidad: v })} placeholder="DD/MM/AAAA" />
+            <div><label className="block font-bold text-slate-700 mb-1">Huella del archivo (solo para identificarlo)</label><div className="flex gap-2"><input value={f.verifactuCertificado.huellaSHA256} readOnly className="flex-1 border border-slate-200 rounded-xl px-3 py-2 font-mono text-[10px] bg-slate-50" /><input type="file" ref={certRef} accept=".p12,.pfx,.cer,.crt,.pem" className="hidden" onChange={subirCert} /><button type="button" onClick={() => certRef.current?.click()} className="px-3 py-2 bg-slate-100 rounded-xl font-bold cursor-pointer" title="Calcula la huella del archivo sin guardarlo"><FileText size={14} /></button></div>{f.verifactuCertificado.archivoNombre && <p className="text-[10px] text-slate-400 mt-1">Archivo: {f.verifactuCertificado.archivoNombre} (no se ha guardado)</p>}</div>
+          </div>
+        </Seccion>
+
+        {/* 9. EJEMPLOS */}
+        <div className="bg-white p-6 rounded-3xl border border-rose-200/80 shadow-xs space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center"><Trash2 size={22} /></div><div><h2 className="font-black text-slate-900 text-base">Datos de ejemplo</h2><p className="text-xs text-slate-500">{hayDemo ? 'La app contiene registros de muestra (clientes, obras, facturas, gastos, citas y movimientos bancarios).' : 'No hay datos de ejemplo cargados.'}</p></div></div>
+            {hayDemo ? <button type="button" onClick={onDeleteExamples} className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer"><Trash2 size={15} /> Borrar todos los ejemplos</button> : <button type="button" onClick={onCargarEjemplos} className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer"><RefreshCw size={15} /> Cargar ejemplos para probar</button>}
+          </div>
+          <p className="text-[11px] text-slate-500">Al borrar los ejemplos también se desvincula la cuenta bancaria de muestra. Tus datos, el catálogo y los kits se conservan.</p>
+        </div>
+      </form>
+
+      {/* EDITOR DE PLANTILLA */}
+      {editTpl && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl space-y-4 my-6">
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100"><h3 className="font-black text-slate-900 text-base flex items-center gap-2"><Palette size={18} className="text-blue-600" /> {nuevaTpl ? 'Nueva plantilla' : `Editar: ${editTpl.nombre}`}</h3><button onClick={() => setEditTpl(null)} className="text-slate-400 hover:text-slate-700 cursor-pointer"><X size={18} /></button></div>
+            <div className="space-y-3 text-xs">
+              <div><label className="block font-bold text-slate-700 mb-1">Nombre *</label><input value={editTpl.nombre} onChange={(e) => setEditTpl({ ...editTpl, nombre: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2 font-bold" /></div>
+              <div><label className="block font-bold text-slate-700 mb-1">Descripción</label><input value={editTpl.descripcion} onChange={(e) => setEditTpl({ ...editTpl, descripcion: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2" /></div>
+              <div className="grid grid-cols-3 gap-3">
+                <div><label className="block font-bold text-slate-700 mb-1">Color</label><div className="flex items-center gap-2"><input type="color" value={editTpl.acento} onChange={(e) => setEditTpl({ ...editTpl, acento: e.target.value })} className="w-10 h-8 rounded-lg cursor-pointer border border-slate-200" /><input value={editTpl.acento} onChange={(e) => setEditTpl({ ...editTpl, acento: e.target.value })} className="w-full border border-slate-200 rounded-xl px-2 py-1.5 font-mono" /></div></div>
+                <div><label className="block font-bold text-slate-700 mb-1">Maquetación</label><select value={editTpl.base || 'moderna'} onChange={(e) => setEditTpl({ ...editTpl, base: e.target.value as any })} className="w-full border border-slate-200 rounded-xl px-2 py-2 bg-white">{TEMPLATE_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></div>
+                <div><label className="block font-bold text-slate-700 mb-1">Tipografía</label><select value={editTpl.fuente || 'sans'} onChange={(e) => setEditTpl({ ...editTpl, fuente: e.target.value })} className="w-full border border-slate-200 rounded-xl px-2 py-2 bg-white">{FONT_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></div>
+              </div>
+              <div><label className="block font-bold text-slate-700 mb-1">Comentario al pie del presupuesto</label><textarea value={editTpl.notaFinal || ''} onChange={(e) => setEditTpl({ ...editTpl, notaFinal: e.target.value })} rows={3} placeholder="Ej.: Pago 50 % a la aceptación del presupuesto y el resto al finalizar la instalación. Validez 30 días." className="w-full border border-slate-200 rounded-xl px-3 py-2" /></div>
+              <div><label className="block font-bold text-slate-700 mb-1">Condiciones al pie de la factura</label><textarea value={editTpl.condicionesPago || ''} onChange={(e) => setEditTpl({ ...editTpl, condicionesPago: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-xl px-3 py-2" /></div>
+              <div><label className="block font-bold text-slate-700 mb-1">Pie de página (texto legal, lema…)</label><input value={editTpl.pieDePagina || ''} onChange={(e) => setEditTpl({ ...editTpl, pieDePagina: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2" /></div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100"><button onClick={() => setEditTpl(null)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer">Cancelar</button><button onClick={() => guardarTpl(editTpl)} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs cursor-pointer">Guardar plantilla</button></div>
+          </div>
+        </div>
+      )}
+
+      {confirmarRestaurar && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto"><AlertTriangle size={24} /></div>
+            <div className="text-center space-y-1"><h3 className="font-black text-slate-900 text-base">¿Restaurar esta copia?</h3><p className="text-xs text-slate-500">Origen: {confirmarRestaurar.origen}. Contiene {confirmarRestaurar.st.clients.length} clientes, {confirmarRestaurar.st.projects.length} presupuestos/obras, {confirmarRestaurar.st.invoices.length} facturas y {confirmarRestaurar.st.expenses.length} gastos. Los datos actuales se sustituyen (queda una versión anterior recuperable en este dispositivo).</p></div>
+            <div className="flex gap-2"><button onClick={() => setConfirmarRestaurar(null)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs cursor-pointer">Cancelar</button><button onClick={() => { onRestaurarEstado(confirmarRestaurar.st); setF(confirmarRestaurar.st.companySettings); setConfirmarRestaurar(null); }} className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-xs cursor-pointer">Sí, restaurar</button></div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const Seccion: React.FC<{ icono: React.ReactNode; color: string; titulo: string; sub: string; accion?: React.ReactNode; children: React.ReactNode }> = ({ icono, color, titulo, sub, accion, children }) => {
+  const cls = { blue: 'bg-blue-50 text-blue-600', indigo: 'bg-indigo-50 text-indigo-600', emerald: 'bg-emerald-50 text-emerald-600', amber: 'bg-amber-50 text-amber-600' }[color] || 'bg-slate-50 text-slate-600';
+  return (
+    <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-200/80 shadow-xs space-y-4">
+      <div className="flex items-center justify-between pb-4 border-b border-slate-100 flex-wrap gap-3">
+        <div className="flex items-center gap-3"><div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${cls}`}>{icono}</div><div><h2 className="font-black text-slate-900 text-base">{titulo}</h2><p className="text-xs text-slate-500">{sub}</p></div></div>
+        {accion}
+      </div>
+      {children}
+    </div>
+  );
+};
+
+const Campo: React.FC<{ label: string; value: string; onChange: (v: string) => void; placeholder?: string; bold?: boolean; mono?: boolean }> = ({ label, value, onChange, placeholder, bold, mono }) => (
+  <div><label className="block text-xs font-bold text-slate-700 mb-1">{label}</label><input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={`w-full border border-slate-200 rounded-xl px-3 py-2 text-xs ${bold ? 'font-bold' : ''} ${mono ? 'font-mono' : ''}`} /></div>
+);
