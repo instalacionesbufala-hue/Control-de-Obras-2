@@ -48,6 +48,16 @@ La carpeta ya trae todo lo necesario: `vite.config.ts` usa rutas relativas (`bas
 6. **Google Calendar y Gmail** (opcionales): en Google Cloud Console del mismo proyecto → *APIs y servicios* → habilita **Google Calendar API** y **Gmail API**. En *Pantalla de consentimiento OAuth* añade tu cuenta como **usuario de prueba** (con la app en modo "Testing" solo pueden conceder permisos las cuentas de prueba, y el permiso dura una hora; para publicar la pantalla de consentimiento Google exige verificación, innecesaria para uso propio).
 7. Los permisos de Google se piden en el momento de usarlos (guardar una cita, enviar un correo) y también desde Configuración → Google.
 
+### Cómo subir los archivos sin que falle
+
+Al subir la carpeta a mano desde la web de GitHub es fácil dejarse algún archivo. Estos tres son imprescindibles y suelen ser los que faltan:
+
+- `package.json` y `package-lock.json`, en la raíz. Sin el segundo, el flujo instala igualmente, pero conviene subirlo.
+- `.github/workflows/deploy.yml`. Las carpetas que empiezan por punto a veces no entran al arrastrar.
+- `firebase-config.json`, en la raíz. Si falta, la compilación falla porque el código lo importa.
+
+Si el flujo termina en rojo, entra en la pestaña **Actions**, abre la ejecución fallida, pulsa el trabajo **build** y despliega el paso marcado en rojo. La primera línea roja dice exactamente qué pasa. Para volver a lanzarlo sin subir nada, usa **Re-run all jobs**.
+
 Qué puede fallar y cómo se arregla:
 
 - **Pantalla en blanco al abrir la URL**: casi siempre es `base`. Ya está en `'./'`, así que la app funciona en cualquier subcarpeta. Si el flujo falla en *Actions*, mira el paso que aparece en rojo (`npm run lint` = tipos, `npm test` = pruebas, `npm run build`).
