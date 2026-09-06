@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Printer, X, ShieldCheck, CheckCircle2, FileText, Phone, Mail, PenTool, Download, Share2, Send, AlertCircle, RefreshCcw } from 'lucide-react';
 import { generarPDFDesdeElemento, descargarBlob, puedeCompartirArchivos, compartirPDF, nombreArchivoPDF } from '../lib/pdf';
 import { enviarConGmail, correoValido } from '../lib/gmail';
+import { mensajeErrorAuth } from '../lib/cloudSync';
 import { firebaseDisponible } from '../lib/firebase';
 import QRCode from 'qrcode';
 import { Project, Invoice, Client, CompanySettings, DocumentBaseTemplate, DocumentTemplate } from '../types';
@@ -204,7 +205,7 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
       setAvisoCorreo({ texto: `Correo enviado a ${correoPara} desde tu Gmail con el PDF adjunto. Lo tienes en tu carpeta Enviados.`, ok: true });
       onCorreoEnviado?.('gmail');
     } catch (e: any) {
-      setAvisoCorreo({ texto: e?.code === 'auth/popup-closed-by-user' ? 'Se cerró la ventana de Google sin conceder el permiso.' : e?.message || 'No se pudo enviar.', ok: false });
+      setAvisoCorreo({ texto: e?.code ? mensajeErrorAuth(e) : e?.message || 'No se pudo enviar.', ok: false });
     } finally {
       setOcupado(null);
     }

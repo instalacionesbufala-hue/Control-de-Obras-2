@@ -1,11 +1,12 @@
 // Inicialización de Firebase (Auth con Google + Firestore con caché local).
-// La configuración viene del archivo que genera Google AI Studio para este proyecto.
-// Para vender la app a otra empresa basta con sustituir firebase-applet-config.json por el
-// de su propio proyecto de Firebase (es configuración pública, no un secreto).
+// La configuración se lee de firebase-config.json (configuración pública del proyecto, no un
+// secreto: lo que protege los datos son las reglas de Firestore y los dominios autorizados).
+// Para instalar la app en otra empresa basta con sustituir ese archivo por el de su propio
+// proyecto de Firebase. Pasos en docs/PROYECTO-FIREBASE-PROPIO.md.
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { initializeFirestore, getFirestore, doc, setDoc, getDoc, onSnapshot, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, User } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
+import firebaseConfig from '../../firebase-config.json';
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 

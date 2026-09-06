@@ -24,6 +24,7 @@ El repositorio incluye `.github/workflows/deploy.yml`: al subir a `main` se cons
 - `docs/GUIA-INICIO.md`: qué hace la app, dónde guarda los datos, cómo publicarla en Google AI Studio o GitHub Pages, configuración de Firebase, Google Calendar y Gmail, envío de PDF por correo, alcance real de VERI*FACTU y rectificativas.
 - `docs/AVISOS-Y-LECTOR-IA.md`: cómo te llega la aceptación del cliente (aviso en la app, script de Google para el correo) y cómo activar el lector de tickets con tu clave de Gemini.
 - `docs/ESTUDIO-SINCRONIZACION-BANCARIA.md`: opciones para leer los movimientos del banco (Norma 43 implementado; PSD2 requiere servidor) y cómo funcionan las propuestas de cruce.
+- `docs/PROYECTO-FIREBASE-PROPIO.md`: crear tu propio proyecto de Firebase (independiente de Google AI Studio), autorizar el dominio y las dos formas de venderla a clientes.
 - `firestore.rules`: reglas de seguridad que hay que publicar en Firestore.
 
 ## Estructura

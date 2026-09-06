@@ -4,7 +4,7 @@ import { probarClaveGemini, MODELO_GEMINI_DEFECTO } from '../lib/gemini';
 import { SCRIPT_AVISO_ACEPTACION, PASOS_SCRIPT } from '../data/appsScript';
 import { CompanySettings, AppState } from '../types';
 import { DEFAULT_TEMPLATES } from '../data/plantillas';
-import { loginWithGoogle, logoutGoogleUser, guardarCopiaEnNube, cargarUltimaCopiaNube, tamanoDocumentoKB, LIMITE_FIRESTORE_KB } from '../lib/cloudSync';
+import { loginWithGoogle, logoutGoogleUser, guardarCopiaEnNube, cargarUltimaCopiaNube, tamanoDocumentoKB, LIMITE_FIRESTORE_KB, mensajeErrorAuth } from '../lib/cloudSync';
 import { exportarCopia, importarCopia, leerCopiaAnterior, tamanoEstadoKB } from '../lib/storage';
 import { firebaseDisponible } from '../lib/firebase';
 import { pedirPermisoGoogle, tieneToken, SCOPE_CALENDAR, SCOPE_GMAIL } from '../lib/googleToken';
@@ -34,6 +34,8 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
   const [copiadoScript, setCopiadoScript] = useState(false);
   const [claveVisible, setClaveVisible] = useState(false);
   const [resultadoIA, setResultadoIA] = useState<{ ok: boolean; texto: string } | null>(null);
+  const [dominioSinAutorizar, setDominioSinAutorizar] = useState(false);
+  const dominioActual = typeof window !== 'undefined' ? window.location.hostname : '';
   const pedirNotif = async () => {
     try {
       const r = await Notification.requestPermission();
@@ -100,7 +102,8 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
         onAviso?.(`Cuenta ${u.email} vinculada. Los datos se sincronizan con la nube.`, 'ok');
       }
     } catch (e: any) {
-      onAviso?.(e?.code === 'auth/popup-closed-by-user' ? 'Ventana de Google cerrada sin iniciar sesión.' : `No se pudo iniciar sesión: ${e?.message || e}`, 'error');
+      if (e?.code === 'auth/unauthorized-domain') setDominioSinAutorizar(true);
+      onAviso?.(mensajeErrorAuth(e), 'error');
     } finally {
       setOcupado(null);
     }
@@ -124,7 +127,7 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
       const t = await pedirPermisoGoogle();
       onAviso?.(`Permiso de Google Calendar y Gmail concedido para ${t.email || 'tu cuenta'} (válido una hora).`, 'ok');
     } catch (e: any) {
-      onAviso?.(e?.message || 'No se concedió el permiso.', 'error');
+      onAviso?.(mensajeErrorAuth(e), 'error');
     } finally {
       setOcupado(null);
     }
@@ -302,6 +305,13 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
         {/* 6. GOOGLE Y NUBE */}
         <Seccion icono={<Cloud size={22} />} color="indigo" titulo="Cuenta de Google, nube y Google Calendar" sub="Opcional. Con la cuenta vinculada, los datos se guardan en la nube y se sincronizan en todos tus dispositivos en tiempo real.">
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3 text-xs">
+            {dominioSinAutorizar && (
+              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-[11px] text-amber-900 space-y-1">
+                <p className="font-bold flex items-center gap-1.5"><AlertTriangle size={14} /> Falta autorizar este dominio en Firebase</p>
+                <p>El navegador está en <strong className="font-mono">{dominioActual}</strong>. Añádelo en la consola de Firebase → Authentication → Settings → Authorized domains → Add domain. Escríbelo tal cual, sin https:// y sin barra final.</p>
+                <div className="flex items-center gap-2 pt-1"><button type="button" onClick={() => { navigator.clipboard?.writeText(dominioActual); onAviso?.(`Dominio ${dominioActual} copiado.`, 'ok'); }} className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold cursor-pointer flex items-center gap-1"><Copy size={12} /> Copiar el dominio</button><a href="https://console.firebase.google.com/" target="_blank" rel="noreferrer" className="px-2.5 py-1.5 bg-white border border-amber-300 text-amber-900 rounded-lg font-bold">Abrir la consola de Firebase</a></div>
+              </div>
+            )}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center font-black text-blue-600 shadow-xs">G</div><div><p className="font-bold text-slate-900">{firebaseUser ? `Vinculada: ${firebaseUser.email}` : 'Sin cuenta vinculada'}</p><p className="text-slate-500 text-[11px]">{firebaseUser ? (estadoNube === 'error' ? `Error de nube: ${errorNube}` : estadoNube === 'sincronizado' ? 'Datos sincronizados con la nube.' : 'Sincronizando…') : 'Los datos se guardan solo en este navegador.'}</p></div></div>
               {firebaseUser ? <button type="button" onClick={desvincular} disabled={ocupado === 'google'} className="px-4 py-2 rounded-xl font-bold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 flex items-center gap-2 cursor-pointer"><LinkIcon size={13} /> Cerrar sesión</button> : <button type="button" onClick={vincularGoogle} disabled={ocupado === 'google' || !firebaseDisponible} className="px-4 py-2 rounded-xl font-bold bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-2 cursor-pointer disabled:opacity-50">{ocupado === 'google' ? <RefreshCw size={13} className="animate-spin" /> : <LinkIcon size={13} />} Vincular cuenta de Google</button>}

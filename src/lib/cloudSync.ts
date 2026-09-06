@@ -4,6 +4,7 @@
 // - Cada cambio local se sube con un pequeño retardo. Se ignoran los ecos del propio
 //   dispositivo comparando deviceId + updatedAt.
 import { auth, db, googleProvider, signInWithPopup, signOut, doc, setDoc, getDoc, onSnapshot, User } from './firebase';
+import firebaseConfig from '../../firebase-config.json';
 import { AppState } from '../types';
 import { migrarEstado } from './storage';
 
@@ -11,6 +12,31 @@ export const loginWithGoogle = async (): Promise<User | null> => {
   const result = await signInWithPopup(auth, googleProvider);
   return result.user;
 };
+
+// Traduce los errores de Firebase Auth a algo accionable. El más habitual al publicar la app en
+// un dominio nuevo es 'auth/unauthorized-domain': hay que añadirlo en la consola de Firebase.
+export function mensajeErrorAuth(e: any): string {
+  const code = e?.code || '';
+  const dominio = typeof window !== 'undefined' ? window.location.hostname : 'este dominio';
+  const proyecto = (firebaseConfig as any).projectId || '';
+  switch (code) {
+    case 'auth/unauthorized-domain':
+      return `El dominio "${dominio}" no está autorizado en Firebase. Entra en la consola de Firebase del proyecto ${proyecto} → Authentication → Settings → Authorized domains → Add domain, escribe exactamente ${dominio} (sin https:// y sin la barra final) y vuelve a intentarlo.`;
+    case 'auth/operation-not-allowed':
+      return `Falta habilitar el acceso con Google. Consola de Firebase → Authentication → Sign-in method → Google → Habilitar.`;
+    case 'auth/configuration-not-found':
+      return `Este proyecto de Firebase (${proyecto}) todavía no tiene Authentication activado. Entra en la consola de Firebase → Authentication → Comenzar, y habilita el proveedor Google.`;
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
+      return 'Ventana de Google cerrada sin iniciar sesión.';
+    case 'auth/popup-blocked':
+      return 'El navegador ha bloqueado la ventana de Google. Permite las ventanas emergentes para este sitio y vuelve a pulsar.';
+    case 'auth/network-request-failed':
+      return 'No hay conexión con Google. Comprueba tu red y vuelve a intentarlo.';
+    default:
+      return `No se pudo iniciar sesión: ${e?.message || e}`;
+  }
+}
 
 export const logoutGoogleUser = async (): Promise<void> => {
   await signOut(auth);

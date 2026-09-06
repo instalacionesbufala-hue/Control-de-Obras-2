@@ -19,7 +19,7 @@ Además: clientes, materiales y conceptos con escandallo, kits, gastos con imput
 
 1. Sube el contenido de esta carpeta (sin `node_modules`) al proyecto de AI Studio, o pega los archivos cambiados.
 2. AI Studio construye la app con Vite y la sirve en su URL pública. No hace falta ninguna variable de entorno: `GEMINI_API_KEY` ya no se usa.
-3. **Firebase**: el archivo `firebase-applet-config.json` es el que genera AI Studio. Para que funcione la nube y el enlace de aceptación:
+3. **Firebase**: el archivo `firebase-config.json` guarda los datos del proyecto (ver `docs/PROYECTO-FIREBASE-PROPIO.md` para crear uno propio). Para que funcione la nube y el enlace de aceptación:
    - En la consola de Firebase del proyecto → Authentication → Sign-in method → habilitar **Google**.
    - Authentication → Settings → **Authorized domains**: añadir el dominio donde se publica la app (AI Studio lo añade solo si usas su hosting; si publicas en otro sitio, añádelo a mano).
    - Firestore → Rules → pegar el contenido de `firestore.rules` y publicar. Estas reglas dan acceso a cada usuario solo a sus datos y permiten que el cliente lea la propuesta con el enlace y cree una única aceptación.
@@ -34,7 +34,17 @@ La carpeta ya trae todo lo necesario: `vite.config.ts` usa rutas relativas (`bas
 2. Sube la carpeta completa **sin `node_modules` ni `dist`** (`.gitignore` ya los excluye).
 3. En el repositorio: **Settings → Pages → Build and deployment → Source: "GitHub Actions"**. Con la primera subida el flujo se ejecuta solo; en la pestaña *Actions* ves si termina en verde. La URL será `https://TU_USUARIO.github.io/NOMBRE_DEL_REPO/`.
 4. **Firebase**: en la consola de Firebase → Authentication → Settings → **Authorized domains** → añade `TU_USUARIO.github.io`. Sin esto, "Vincular cuenta de Google" falla con `auth/unauthorized-domain`.
-5. **Firestore**: publica `firestore.rules` en la base de datos que usa la app (el nombre está en `firebase-applet-config.json`, campo `firestoreDatabaseId`; si no es `(default)`, selecciónala en el desplegable de Firestore antes de pegar las reglas).
+
+   Paso a paso, con el error delante:
+
+   1. Abre <https://console.firebase.google.com/> con la **misma cuenta de Google** con la que se creó el proyecto y entra en el proyecto `gen-lang-client-0758030321` (nombre "Default Gemini Project").
+   2. Menú izquierdo → **Build → Authentication**. Si es la primera vez, pulsa **Comenzar** y en **Sign-in method** habilita **Google** (elige un correo de asistencia y guarda).
+   3. Pestaña **Settings** (dentro de Authentication) → apartado **Authorized domains** → botón **Add domain**.
+   4. Escribe el dominio **sin `https://` y sin barra final**, por ejemplo `instalacionesbufala-hue.github.io`, y pulsa **Add**. Repite con el dominio de AI Studio si también la publicas allí.
+   5. Vuelve a la app, recarga la página y pulsa **Vincular cuenta de Google**.
+
+   La propia app te dice qué dominio falta: al fallar, la sección de Google muestra un aviso con el dominio exacto y un botón para copiarlo.
+5. **Firestore**: publica `firestore.rules` en la base de datos que usa la app (el nombre está en `firebase-config.json`, campo `firestoreDatabaseId`; si no es `(default)`, selecciónala en el desplegable de Firestore antes de pegar las reglas).
 6. **Google Calendar y Gmail** (opcionales): en Google Cloud Console del mismo proyecto → *APIs y servicios* → habilita **Google Calendar API** y **Gmail API**. En *Pantalla de consentimiento OAuth* añade tu cuenta como **usuario de prueba** (con la app en modo "Testing" solo pueden conceder permisos las cuentas de prueba, y el permiso dura una hora; para publicar la pantalla de consentimiento Google exige verificación, innecesaria para uso propio).
 7. Los permisos de Google se piden en el momento de usarlos (guardar una cita, enviar un correo) y también desde Configuración → Google.
 
