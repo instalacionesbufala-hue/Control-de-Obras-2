@@ -35,6 +35,8 @@ export interface PropuestaPublica {
     ivaTotal: number;
     total: number;
     notaFinal?: string;
+    sinImpuestos?: boolean;
+    motivoSinImpuestos?: string;
     lineas: Array<{ concepto: string; cantidad: number; unidad: string; precioUnitario: number; ivaPorcentaje: number; total: number; materiales?: Array<{ nombre: string; cantidad: number; unidad: string }> }>;
   };
   exigirFirma: boolean;
@@ -70,7 +72,7 @@ export function construirPropuesta(project: Project, settings: CompanySettings, 
     materiales: (p.materiales || []).filter((m) => m.visibleCliente).map((m) => ({ nombre: m.nombre, cantidad: m.cantidad * p.cantidad, unidad: m.unidad })),
   }));
   const base = lineas.reduce((a, l) => a + l.cantidad * l.precioUnitario, 0) || project.presupuestoAceptado;
-  const iva = lineas.reduce((a, l) => a + l.cantidad * l.precioUnitario * (l.ivaPorcentaje / 100), 0) || project.presupuestoAceptado * 0.21;
+  const iva = project.sinImpuestos ? 0 : lineas.reduce((a, l) => a + l.cantidad * l.precioUnitario * (l.ivaPorcentaje / 100), 0) || project.presupuestoAceptado * 0.21;
   return {
     token,
     ownerUid,
@@ -99,6 +101,8 @@ export function construirPropuesta(project: Project, settings: CompanySettings, 
       ivaTotal: Math.round(iva * 100) / 100,
       total: Math.round((base + iva) * 100) / 100,
       notaFinal: project.notaFinal || settings.notaFinalPresupuestoDefecto,
+      sinImpuestos: project.sinImpuestos || undefined,
+      motivoSinImpuestos: project.sinImpuestos ? project.motivoSinImpuestos : undefined,
       lineas,
     },
     exigirFirma,

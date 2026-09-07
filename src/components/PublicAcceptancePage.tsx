@@ -137,9 +137,10 @@ export const PublicAcceptancePage: React.FC<{ token: string }> = ({ token }) => 
             </tbody>
           </table>
           <div className="p-3 bg-slate-50 text-xs space-y-1">
-            <div className="flex justify-between"><span>Base imponible</span><span className="font-mono font-bold">{formatCurrency(pr.baseImponible)}</span></div>
-            <div className="flex justify-between"><span>IVA</span><span className="font-mono font-bold">{formatCurrency(pr.ivaTotal)}</span></div>
-            <div className="flex justify-between text-sm font-black pt-1 border-t border-slate-200"><span>TOTAL</span><span className="font-mono">{formatCurrency(pr.total)}</span></div>
+            {!pr.sinImpuestos && <div className="flex justify-between"><span>Base imponible</span><span className="font-mono font-bold">{formatCurrency(pr.baseImponible)}</span></div>}
+            {!pr.sinImpuestos && <div className="flex justify-between"><span>IVA</span><span className="font-mono font-bold">{formatCurrency(pr.ivaTotal)}</span></div>}
+            <div className="flex justify-between text-sm font-black pt-1 border-t border-slate-200"><span>{pr.sinImpuestos ? 'TOTAL (sin impuestos)' : 'TOTAL'}</span><span className="font-mono">{formatCurrency(pr.total)}</span></div>
+            {pr.sinImpuestos && <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 mt-1">{pr.motivoSinImpuestos || 'Importes sin impuestos. Los que correspondan se aplicarán en la factura.'}</p>}
           </div>
         </div>
 
@@ -199,7 +200,7 @@ export const PublicAcceptancePage: React.FC<{ token: string }> = ({ token }) => 
 
             <label className="flex items-start gap-3 cursor-pointer text-xs text-slate-700 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
               <input type="checkbox" checked={terminos} onChange={(e) => setTerminos(e.target.checked)} className="mt-0.5 w-4 h-4 rounded" />
-              <span>He leído y acepto el presupuesto <strong>{pr.codigo}</strong> por <strong>{formatCurrency(pr.total)}</strong> (IVA incluido) y sus condiciones. Mis datos se usarán únicamente para ejecutar y facturar esta instalación.</span>
+              <span>He leído y acepto el presupuesto <strong>{pr.codigo}</strong> por <strong>{formatCurrency(pr.total)}</strong> {pr.sinImpuestos ? '(sin impuestos)' : '(IVA incluido)'} y sus condiciones. Mis datos se usarán únicamente para ejecutar y facturar esta instalación.</span>
             </label>
 
             {errorForm && <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2"><AlertCircle size={16} /> {errorForm}</div>}

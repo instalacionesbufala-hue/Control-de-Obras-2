@@ -6,7 +6,7 @@ import { CompanySettings, AppState } from '../types';
 import { DEFAULT_TEMPLATES } from '../data/plantillas';
 import { loginWithGoogle, logoutGoogleUser, guardarCopiaEnNube, cargarUltimaCopiaNube, tamanoDocumentoKB, LIMITE_FIRESTORE_KB, mensajeErrorAuth } from '../lib/cloudSync';
 import { exportarCopia, importarCopia, leerCopiaAnterior, tamanoEstadoKB } from '../lib/storage';
-import { firebaseDisponible } from '../lib/firebase';
+import { firebaseDisponible, configPendiente, claveMalCopiada, proyectoFirebase } from '../lib/firebase';
 import { pedirPermisoGoogle, tieneToken, SCOPE_CALENDAR, SCOPE_GMAIL } from '../lib/googleToken';
 import { TemplatesSettings } from './TemplatesSettings';
 import { numeroDocumento } from '../utils/formatters';
@@ -91,6 +91,7 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
   };
 
   const vincularGoogle = async () => {
+    if (configPendiente) return onAviso?.('Falta completar firebase-config.json con los datos de tu proyecto de Firebase (apiKey, appId y messagingSenderId). Pasos en docs/PROYECTO-FIREBASE-PROPIO.md.', 'error');
     if (!firebaseDisponible) return onAviso?.('Firebase no está configurado en esta instalación.', 'error');
     setOcupado('google');
     try {
@@ -305,10 +306,16 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
         {/* 6. GOOGLE Y NUBE */}
         <Seccion icono={<Cloud size={22} />} color="indigo" titulo="Cuenta de Google, nube y Google Calendar" sub="Opcional. Con la cuenta vinculada, los datos se guardan en la nube y se sincronizan en todos tus dispositivos en tiempo real.">
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3 text-xs">
-            {dominioSinAutorizar && (
+            {configPendiente && (
+              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-[11px] text-amber-900 space-y-1">
+                <p className="font-bold flex items-center gap-1.5"><AlertTriangle size={14} /> {claveMalCopiada ? "La clave de Firebase está mal copiada" : "Falta completar firebase-config.json"}</p>
+                <p>{claveMalCopiada ? "La apiKey del archivo firebase-config.json no tiene el formato de una clave de Google: seguramente se copió de la consola mientras estaba oculta y se copiaron los puntos de la máscara. Muéstrala con el icono del ojo y vuelve a copiarla. " : ""}El archivo tiene huecos sin rellenar o mal copiados, así que la nube y el enlace de aceptación están desactivados. En la consola de Firebase de tu proyecto, rueda dentada → <strong>Configuración del proyecto</strong> → apartado <strong>Tus apps</strong> → aplicación web → <strong>Configuración del SDK</strong>. Copia <strong>apiKey</strong>, <strong>appId</strong> y <strong>messagingSenderId</strong> y pégalos en <span className="font-mono">firebase-config.json</span>, en la raíz del proyecto. Todo lo demás de la app funciona mientras tanto, guardando en este dispositivo.</p>
+              </div>
+            )}
+            {dominioSinAutorizar && !configPendiente && (
               <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-[11px] text-amber-900 space-y-1">
                 <p className="font-bold flex items-center gap-1.5"><AlertTriangle size={14} /> Falta autorizar este dominio en Firebase</p>
-                <p>El navegador está en <strong className="font-mono">{dominioActual}</strong>. Añádelo en la consola de Firebase → Authentication → Settings → Authorized domains → Add domain. Escríbelo tal cual, sin https:// y sin barra final.</p>
+                <p>El navegador está en <strong className="font-mono">{dominioActual}</strong>. Añádelo en la consola de Firebase <strong>del proyecto {proyectoFirebase}</strong> → Authentication → Settings → Authorized domains → Add domain. Escríbelo tal cual, sin https:// y sin barra final. Comprueba que el proyecto es el correcto: si autorizaste el dominio en otro proyecto distinto, hay que cambiar <span className="font-mono">firebase-config.json</span>.</p>
                 <div className="flex items-center gap-2 pt-1"><button type="button" onClick={() => { navigator.clipboard?.writeText(dominioActual); onAviso?.(`Dominio ${dominioActual} copiado.`, 'ok'); }} className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold cursor-pointer flex items-center gap-1"><Copy size={12} /> Copiar el dominio</button><a href="https://console.firebase.google.com/" target="_blank" rel="noreferrer" className="px-2.5 py-1.5 bg-white border border-amber-300 text-amber-900 rounded-lg font-bold">Abrir la consola de Firebase</a></div>
               </div>
             )}

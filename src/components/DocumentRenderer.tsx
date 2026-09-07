@@ -100,6 +100,8 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
     setFontChoice(plantilla.fuente || 'sans');
   }, [plantillaId, plantillaForzada?.base, plantillaForzada?.acento, plantillaForzada?.fuente]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const sinImpuestos = !!project?.sinImpuestos;
+
   // ---- Líneas y totales ----
   const { lineas, baseImponible, ivasPorTipo, ivaTotal, irpfTotal, totalDoc } = useMemo(() => {
     let lineas: LineaDoc[] = [];
@@ -112,11 +114,11 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
         cantidad: p.cantidad,
         unidad: p.unidad,
         precioUnitario: p.precioUnitario,
-        ivaPorcentaje: p.ivaPorcentaje,
-        total: p.cantidad * p.precioUnitario * (1 + p.ivaPorcentaje / 100),
+        ivaPorcentaje: project.sinImpuestos ? 0 : p.ivaPorcentaje,
+        total: p.cantidad * p.precioUnitario * (1 + (project.sinImpuestos ? 0 : p.ivaPorcentaje) / 100),
         materiales: (p.materiales || []).filter((m) => m.visibleCliente).map((m) => ({ nombre: m.nombre, cantidad: Math.round(m.cantidad * p.cantidad * 100) / 100, unidad: m.unidad })),
       }));
-      if (lineas.length === 0) lineas = [{ concepto: project.nombre, cantidad: 1, unidad: 'ud', precioUnitario: project.presupuestoAceptado, ivaPorcentaje: 21, total: project.presupuestoAceptado * 1.21 }];
+      if (lineas.length === 0) { const iva = project.sinImpuestos ? 0 : 21; lineas = [{ concepto: project.nombre, cantidad: 1, unidad: 'ud', precioUnitario: project.presupuestoAceptado, ivaPorcentaje: iva, total: project.presupuestoAceptado * (1 + iva / 100) }]; }
     }
     const base = lineas.reduce((a, l) => a + l.cantidad * l.precioUnitario, 0);
     const ivasPorTipo = new Map<number, { base: number; cuota: number }>();
@@ -130,6 +132,7 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
     const irpfTotal = invoice?.irpfTotal || 0;
     return { lineas, baseImponible: base, ivasPorTipo, ivaTotal, irpfTotal, totalDoc: base + ivaTotal - irpfTotal };
   }, [invoice, project]);
+
 
   // ---- Datos de cabecera ----
   const docNumero = invoice ? invoice.numero : project?.codigo || '';
@@ -285,7 +288,7 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
             <th className="p-3">Concepto</th>
             <th className="p-3 text-center">Cant.</th>
             <th className="p-3 text-right">Precio</th>
-            <th className="p-3 text-center">IVA</th>
+            {!sinImpuestos && <th className="p-3 text-center">IVA</th>}
             <th className="p-3 text-right">Importe</th>
           </tr>
         </thead>
@@ -306,7 +309,7 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
                 </td>
                 <td className="p-3 text-center whitespace-nowrap">{l.cantidad} {l.unidad || 'ud'}</td>
                 <td className="p-3 text-right font-mono whitespace-nowrap">{formatCurrency(l.precioUnitario)}</td>
-                <td className="p-3 text-center font-mono">{l.ivaPorcentaje > 0 ? `${l.ivaPorcentaje} %` : '—'}</td>
+                {!sinImpuestos && <td className="p-3 text-center font-mono">{l.ivaPorcentaje > 0 ? `${l.ivaPorcentaje} %` : '—'}</td>}
                 <td className="p-3 text-right font-mono font-bold whitespace-nowrap">{formatCurrency(l.cantidad * l.precioUnitario)}</td>
               </tr>
             </React.Fragment>
@@ -319,13 +322,13 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
   const bloqueTotales = (
     <div className="flex justify-end pt-2">
       <div className={`w-full sm:w-80 p-4 rounded-xl border space-y-1.5 text-xs ${isDark ? 'bg-slate-900/90 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
-        <div className="flex justify-between"><span>Base imponible</span><span className="font-mono font-bold">{formatCurrency(baseImponible)}</span></div>
-        {Array.from(ivasPorTipo.entries()).map(([tipoIva, e]) => (
+        {!sinImpuestos && <div className="flex justify-between"><span>Base imponible</span><span className="font-mono font-bold">{formatCurrency(baseImponible)}</span></div>}
+        {!sinImpuestos && Array.from(ivasPorTipo.entries()).map(([tipoIva, e]) => (
           <div key={tipoIva} className="flex justify-between"><span>{tipoIva > 0 ? `IVA ${tipoIva} %` : invoice?.inversionSujetoPasivo ? 'IVA (inversión del sujeto pasivo)' : 'IVA 0 %'}{ivasPorTipo.size > 1 ? ` sobre ${formatCurrency(e.base)}` : ''}</span><span className="font-mono font-bold">{formatCurrency(e.cuota)}</span></div>
         ))}
         {irpfTotal > 0 && <div className="flex justify-between"><span>Retención IRPF {invoice?.irpfPorcentaje} %</span><span className="font-mono font-bold">−{formatCurrency(irpfTotal)}</span></div>}
         <div className={`flex justify-between text-sm font-black pt-2 border-t ${isDark ? 'border-slate-800 text-cyan-400' : 'border-slate-200'}`} style={!isDark ? { color: accentColor } : {}}>
-          <span>TOTAL</span><span className="font-mono">{formatCurrency(totalDoc)}</span>
+          <span>{sinImpuestos ? 'TOTAL (sin impuestos)' : 'TOTAL'}</span><span className="font-mono">{formatCurrency(totalDoc)}</span>
         </div>
       </div>
     </div>
@@ -413,9 +416,16 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
     </div>
   ) : null;
 
+  const avisoSinImpuestos = sinImpuestos ? (
+    <div className={`p-3.5 rounded-xl border text-[11px] ${isDark ? 'bg-amber-950/40 border-amber-500/40 text-amber-200' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
+      <strong>Importes sin impuestos.</strong>{project?.motivoSinImpuestos ? ` ${project.motivoSinImpuestos}` : ' Los impuestos que correspondan se aplicarán en la factura.'}
+    </div>
+  ) : null;
+
   const cuerpo = (
     <>
       {bloqueRectificativa}
+      {avisoSinImpuestos}
       {tarjetaCliente}
       {tablaLineas}
       {bloqueTotales}

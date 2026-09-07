@@ -31,7 +31,7 @@ export const ClientAcceptancePortal: React.FC<Props> = ({ project, companySettin
   const total = useMemo(() => {
     const partidas = project.partidas || [];
     if (partidas.length === 0) return project.presupuestoAceptado * 1.21;
-    return partidas.reduce((a, p) => a + p.cantidad * p.precioUnitario * (1 + p.ivaPorcentaje / 100), 0);
+    return partidas.reduce((a, p) => a + p.cantidad * p.precioUnitario * (1 + (project.sinImpuestos ? 0 : p.ivaPorcentaje) / 100), 0);
   }, [project]);
 
   const huecos = useMemo(() => (project.huecosPropuestos && project.huecosPropuestos.length > 0 ? project.huecosPropuestos : huecosLibres(calendarEvents, companySettings).slice(0, 6)), [project, calendarEvents, companySettings]);
@@ -118,7 +118,7 @@ export const ClientAcceptancePortal: React.FC<Props> = ({ project, companySettin
 
               <label className="flex items-start gap-3 cursor-pointer text-xs text-slate-700 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
                 <input type="checkbox" checked={terminos} onChange={(e) => setTerminos(e.target.checked)} className="mt-0.5 w-4 h-4 rounded" />
-                <span>El cliente acepta el presupuesto <strong>{project.codigo}</strong> por <strong>{formatCurrency(total)}</strong> (IVA incluido) y sus condiciones.</span>
+                <span>El cliente acepta el presupuesto <strong>{project.codigo}</strong> por <strong>{formatCurrency(total)}</strong> {project.sinImpuestos ? '(sin impuestos)' : '(IVA incluido)'} y sus condiciones.</span>
               </label>
 
               {errorMsg && <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2"><AlertCircle size={16} /> {errorMsg}</div>}

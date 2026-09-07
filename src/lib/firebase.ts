@@ -23,7 +23,16 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-export const firebaseDisponible = Boolean((firebaseConfig as any).apiKey && (firebaseConfig as any).projectId);
+const cfg = firebaseConfig as Record<string, string>;
+// Los huecos del archivo de ejemplo empiezan por PEGA_AQUI_: mientras estén sin rellenar,
+// la nube no puede funcionar y conviene decirlo en vez de fallar de forma rara.
+const faltaAlgo = ['apiKey', 'appId', 'projectId'].some((k) => !cfg[k] || cfg[k].startsWith('PEGA_AQUI_'));
+// Una clave copiada de la consola mientras estaba oculta trae puntos de máscara (•) y engaña,
+// porque mide lo mismo que la buena. Se comprueba el formato real.
+export const claveMalCopiada = Boolean(cfg.apiKey) && !cfg.apiKey.startsWith('PEGA_AQUI_') && !/^AIza[0-9A-Za-z_-]{35}$/.test(cfg.apiKey);
+export const configPendiente = faltaAlgo || claveMalCopiada;
+export const proyectoFirebase = cfg.projectId || '';
+export const firebaseDisponible = Boolean(cfg.apiKey && cfg.projectId) && !configPendiente;
 
 export { signInWithPopup, signOut, onAuthStateChanged, doc, setDoc, getDoc, onSnapshot };
 export type { User };

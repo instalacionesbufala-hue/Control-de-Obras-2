@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FileCheck2, Plus, Search, Calendar, FileText, CheckCircle2, Trash2, Clock, User, MapPin, X, Upload, HardHat, XCircle, Sparkles, Check, ShieldCheck, Send, Phone, Mail, Eye, CalendarDays, Calculator, Lock, PenTool, PackagePlus, Copy, Link as LinkIcon, AlertCircle, EyeOff, Edit3, Image as ImageIcon, Info } from 'lucide-react';
-import { Project, Client, ProjectDocument, ProjectPhoto, ProjectLog, PresupuestoPartida, CatalogCategory, CatalogItem, MaterialCostComponent, CalendarInstallation, CompanySettings, Kit, FirmaCliente, HuecoPropuesto, Invoice } from '../types';
+import { Project, Client, ProjectDocument, ProjectPhoto, ProjectLog, PresupuestoPartida, CatalogCategory, CatalogItem, MaterialCostComponent, CalendarInstallation, CompanySettings, Kit, FirmaCliente, HuecoPropuesto, Invoice, MOTIVOS_SIN_IMPUESTOS } from '../types';
 import { formatCurrency, formatDate, uid, telefonoWhatsApp, redondear2 } from '../utils/formatters';
 import { PeriodFilter } from './PeriodFilter';
 import { PeriodoFiltro, periodoActual, coincidePeriodo, aniosDisponibles, hoyISO, addDays, etiquetaPeriodo, fechaES } from '../utils/dates';
@@ -104,6 +104,9 @@ export const ProjectsView: React.FC<Props> = (props) => {
   const [fDireccion, setFDireccion] = useState('');
   const [fPlantilla, setFPlantilla] = useState(companySettings.plantillaPorDefecto);
   const [fNota, setFNota] = useState(companySettings.notaFinalPresupuestoDefecto);
+  const [fSinImpuestos, setFSinImpuestos] = useState(false);
+  const [fMotivoId, setFMotivoId] = useState('orientativo');
+  const [fMotivoTexto, setFMotivoTexto] = useState(MOTIVOS_SIN_IMPUESTOS[0].texto);
   const [fFechaFin, setFFechaFin] = useState(addDays(hoyISO(), 30));
   const [partidas, setPartidas] = useState<PresupuestoPartida[]>([]);
   const [expandidas, setExpandidas] = useState<Record<string, boolean>>({});
@@ -175,6 +178,9 @@ export const ProjectsView: React.FC<Props> = (props) => {
     setFDireccion(clients[0]?.direccion || '');
     setFPlantilla(companySettings.plantillaPorDefecto);
     setFNota(companySettings.notaFinalPresupuestoDefecto);
+    setFSinImpuestos(false);
+    setFMotivoId('orientativo');
+    setFMotivoTexto(MOTIVOS_SIN_IMPUESTOS[0].texto);
     setFFechaFin(addDays(hoyISO(), 30));
     setPartidas([]);
     setExpandidas({});
@@ -188,6 +194,13 @@ export const ProjectsView: React.FC<Props> = (props) => {
     setFDireccion(p.direccion);
     setFPlantilla(p.plantillaPresupuesto || companySettings.plantillaPorDefecto);
     setFNota(p.notaFinal || companySettings.notaFinalPresupuestoDefecto);
+    setFSinImpuestos(!!p.sinImpuestos);
+    {
+      const guardado = p.motivoSinImpuestos || '';
+      const preset = MOTIVOS_SIN_IMPUESTOS.find((m) => m.texto && m.texto === guardado);
+      setFMotivoId(preset ? preset.id : guardado ? 'otro' : 'orientativo');
+      setFMotivoTexto(guardado || MOTIVOS_SIN_IMPUESTOS[0].texto);
+    }
     setFFechaFin(p.fechaFinPrevista);
     setPartidas((p.partidas || []).map(recalcPartida));
     setEditandoPartidas(true);
@@ -219,10 +232,10 @@ export const ProjectsView: React.FC<Props> = (props) => {
     if (partidas.length === 0 || partidas.some((p) => !p.concepto.trim())) return setErrorForm('Añade al menos una partida y ponles concepto.');
     const limpias = partidas.map(recalcPartida);
     if (editandoPartidas && selected) {
-      onUpdateProject(selected.id, { nombre: fNombre.trim(), direccion: fDireccion || client.direccion, plantillaPresupuesto: fPlantilla, notaFinal: fNota, fechaFinPrevista: fFechaFin, partidas: limpias, presupuestoAceptado: tot.base });
+      onUpdateProject(selected.id, { nombre: fNombre.trim(), direccion: fDireccion || client.direccion, plantillaPresupuesto: fPlantilla, notaFinal: fNota, fechaFinPrevista: fFechaFin, partidas: limpias, presupuestoAceptado: tot.base, sinImpuestos: fSinImpuestos || undefined, motivoSinImpuestos: fSinImpuestos ? fMotivoTexto.trim() || undefined : undefined });
       onAddLog(selected.id, 'Partidas del presupuesto modificadas.', 'avance');
     } else {
-      onCreateProject({ codigo: siguienteCodigo, nombre: fNombre.trim(), clienteId: client.id, clienteNombre: client.nombre, clienteEmail: client.email, clienteTelefono: client.telefono, direccion: fDireccion || client.direccion, estado: 'Borrador', fechaInicio: hoyISO(), fechaFinPrevista: fFechaFin, presupuestoAceptado: tot.base, totalFacturado: 0, totalGastos: 0, porcentajeAvance: 0, partidas: limpias, plantillaPresupuesto: fPlantilla, notaFinal: fNota });
+      onCreateProject({ codigo: siguienteCodigo, nombre: fNombre.trim(), clienteId: client.id, clienteNombre: client.nombre, clienteEmail: client.email, clienteTelefono: client.telefono, direccion: fDireccion || client.direccion, estado: 'Borrador', fechaInicio: hoyISO(), fechaFinPrevista: fFechaFin, presupuestoAceptado: tot.base, totalFacturado: 0, totalGastos: 0, porcentajeAvance: 0, partidas: limpias, plantillaPresupuesto: fPlantilla, notaFinal: fNota, sinImpuestos: fSinImpuestos || undefined, motivoSinImpuestos: fSinImpuestos ? fMotivoTexto.trim() || undefined : undefined });
     }
     setShowCreate(false);
   };
@@ -627,10 +640,25 @@ export const ProjectsView: React.FC<Props> = (props) => {
                 {partidas.length === 0 && <p className="text-slate-400 text-center py-4">Añade partidas desde el catálogo, un kit o una partida libre.</p>}
               </div>
 
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                <label className="flex items-center justify-between cursor-pointer gap-3">
+                  <span><span className="font-bold text-slate-800">Presentar este presupuesto sin impuestos</span><span className="block text-[11px] text-slate-500">Para trabajos en los que no procede repercutir el IVA. Se ocultan la columna y el total de IVA, y se imprime el motivo.</span></span>
+                  <input type="checkbox" checked={fSinImpuestos} onChange={(e) => setFSinImpuestos(e.target.checked)} className="w-4 h-4 accent-blue-600 shrink-0" />
+                </label>
+                {fSinImpuestos && (
+                  <div className="space-y-2 pt-2 border-t border-slate-200">
+                    <select value={fMotivoId} onChange={(e) => { const m = MOTIVOS_SIN_IMPUESTOS.find((x) => x.id === e.target.value); setFMotivoId(e.target.value); if (m && m.texto) setFMotivoTexto(m.texto); else setFMotivoTexto(''); }} className="w-full border border-slate-200 rounded-xl px-3 py-2 bg-white font-bold">
+                      {MOTIVOS_SIN_IMPUESTOS.map((m) => <option key={m.id} value={m.id}>{m.etiqueta}</option>)}
+                    </select>
+                    <textarea value={fMotivoTexto} onChange={(e) => { setFMotivoTexto(e.target.value); setFMotivoId('otro'); }} rows={2} placeholder="Texto que verá el cliente explicando por qué no se incluyen impuestos" className="w-full border border-slate-200 rounded-xl px-3 py-2" />
+                    <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">Esto afecta solo al presupuesto. Al facturar, la factura llevará el IVA que corresponda salvo que marques inversión del sujeto pasivo al emitirla.</p>
+                  </div>
+                )}
+              </div>
               <div><label className="block font-bold text-slate-700 mb-1">Comentario al pie del presupuesto</label><textarea value={fNota} onChange={(e) => setFNota(e.target.value)} rows={3} className="w-full border border-slate-200 rounded-xl px-3 py-2" placeholder="Forma de pago, validez, garantía…" /></div>
 
               <div className="p-4 bg-slate-900 text-white rounded-2xl grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div><span className="text-[10px] text-slate-400 uppercase font-bold">Base imponible</span><p className="text-lg font-black">{formatCurrency(tot.base)}</p><span className="text-[10px] text-slate-400">{formatCurrency(tot.base + tot.iva)} con IVA</span></div>
+                <div><span className="text-[10px] text-slate-400 uppercase font-bold">Base imponible</span><p className="text-lg font-black">{formatCurrency(tot.base)}</p><span className="text-[10px] text-slate-400">{fSinImpuestos ? 'sin impuestos' : `${formatCurrency(tot.base + tot.iva)} con IVA`}</span></div>
                 <div><span className="text-[10px] text-slate-400 uppercase font-bold">Coste previsto</span><p className="text-lg font-black text-amber-400">{formatCurrency(tot.coste)}</p></div>
                 <div><span className="text-[10px] text-slate-400 uppercase font-bold">Beneficio</span><p className="text-lg font-black text-emerald-400">{formatCurrency(tot.beneficio)}</p></div>
                 <div><span className="text-[10px] text-slate-400 uppercase font-bold">Margen sobre venta</span><p className={`text-lg font-black ${tot.margen >= 30 ? 'text-emerald-400' : tot.margen >= 15 ? 'text-amber-400' : 'text-rose-400'}`}>{tot.margen.toFixed(0)} %</p></div>

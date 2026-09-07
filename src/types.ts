@@ -127,6 +127,16 @@ export interface FirmaCliente {
   metodo?: 'portal' | 'presencial' | 'codigo';
 }
 
+// Motivos por los que un presupuesto se presenta sin impuestos. Solo afecta al presupuesto:
+// la factura lleva siempre su régimen fiscal y su zona VERI*FACTU.
+export const MOTIVOS_SIN_IMPUESTOS: Array<{ id: string; etiqueta: string; texto: string }> = [
+  { id: 'orientativo', etiqueta: 'Presupuesto orientativo', texto: 'Importes sin impuestos. Este presupuesto es orientativo y no constituye factura; los impuestos que correspondan se aplicarán en la factura definitiva.' },
+  { id: 'isp', etiqueta: 'Inversión del sujeto pasivo', texto: 'Operación con inversión del sujeto pasivo (art. 84.Uno.2º de la Ley 37/1992 del IVA). El IVA lo declara el destinatario, por lo que los importes se indican sin impuestos.' },
+  { id: 'exenta', etiqueta: 'Operación exenta de IVA', texto: 'Operación exenta de IVA (art. 20 de la Ley 37/1992). Los importes se indican sin impuestos.' },
+  { id: 'nosujeta', etiqueta: 'Operación no sujeta', texto: 'Operación no sujeta a IVA. Los importes se indican sin impuestos.' },
+  { id: 'otro', etiqueta: 'Otro motivo (lo escribo yo)', texto: '' },
+];
+
 export interface HuecoPropuesto {
   fecha: string; // YYYY-MM-DD
   franja: 'manana' | 'tarde';
@@ -166,6 +176,9 @@ export interface Project {
   partidas?: PresupuestoPartida[];
   motivoRechazo?: string;
   plantillaPresupuesto?: string;
+  // Presupuesto presentado sin impuestos (trabajos donde no procede repercutirlos)
+  sinImpuestos?: boolean;
+  motivoSinImpuestos?: string; // texto que se imprime explicando por qué
   notaFinal?: string; // comentario al pie del presupuesto (condiciones de pago, validez...)
   firmaCliente?: FirmaCliente;
   // Cita de instalación

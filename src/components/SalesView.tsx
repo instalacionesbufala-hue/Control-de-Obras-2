@@ -86,7 +86,7 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
     setFecha(hoyISO());
     setFechaVencimiento(addDays(hoyISO(), companySettings.diasVencimientoFactura || 30));
     setNotaFinal(companySettings.condicionesPagoDefecto || '');
-    setIsp(false);
+    setIsp(!!preselectedProject?.sinImpuestos && /inversi[óo]n del sujeto pasivo/i.test(preselectedProject?.motivoSinImpuestos || ''));
     const p = preselectedProject ? projects.find((x) => x.id === preselectedProject.id) || preselectedProject : null;
     if (p) {
       setClienteId(p.clienteId);
