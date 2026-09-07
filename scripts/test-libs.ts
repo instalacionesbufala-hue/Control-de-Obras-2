@@ -1,6 +1,7 @@
 import { parseNorma43, parseCSVBanco, leerExtracto } from '../src/lib/norma43';
 import { sha256HexUpper, VECTORES_AEAT, cadenaAlta, urlCotejoQR } from '../src/lib/verifactu';
 import { proponerCruces } from '../src/lib/conciliacion';
+import { elegirModelo } from '../src/lib/gemini';
 
 const pad = (s: string, n: number) => s.padEnd(n, ' ').substring(0, n);
 const n43 = [
@@ -28,3 +29,22 @@ console.log('detecta N43:', leerExtracto(n43, 'x.txt').formato, '· detecta CSV:
   const props = proponerCruces({ id: 't', fecha: '2026-09-03', concepto: 'TRANSFERENCIA RECIBIDA LAURA MARTIN FAC-2026-001', importe: 1079.93, tipo: 'ingreso', conciliado: false, entidad: 'B', origen: 'csv' } as any, [{ id: 'i1', numero: 'FAC-2026-001', clienteNombre: 'Laura Martín Ruiz', total: 1079.93, fecha: '2026-09-01', estado: 'Pendiente' } as any], []);
   console.log('cruce', props[0]?.confianza, props[0]?.motivos);
 })();
+
+// ---- Elección del modelo de Gemini ----
+// Google retira y renombra modelos: la app pide el catálogo y elige. Estos casos fijan el criterio.
+{
+  const m = (ids: string[]) => ids.map((id) => ({ id, nombre: id }));
+  const casos: Array<[string, string[], string | null]> = [
+    ['catálogo típico', ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'], 'gemini-2.5-flash-lite'],
+    ['solo pro', ['gemini-3-pro', 'gemini-2.5-pro'], 'gemini-3-pro'],
+    ['descarta preliminares si hay estables', ['gemini-3-flash-preview', 'gemini-2.5-flash'], 'gemini-2.5-flash'],
+    ['si todo es preliminar, se usa igual', ['gemini-4-flash-preview'], 'gemini-4-flash-preview'],
+    ['gana la versión más nueva', ['gemini-2.5-flash', 'gemini-3-flash'], 'gemini-3-flash'],
+    ['nombre desconocido: se usa el que haya', ['modelo-raro-1'], 'modelo-raro-1'],
+    ['sin modelos', [], null],
+  ];
+  for (const [nombre, ids, esperado] of casos) {
+    const r = elegirModelo(m(ids));
+    console.log('modelo ·', nombre, r === esperado ? 'OK' : `MAL (devolvió ${r})`);
+  }
+}

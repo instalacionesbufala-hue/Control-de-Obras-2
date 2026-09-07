@@ -64,6 +64,7 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
   franjasActivas: { manana: true, tarde: true },
   disponibilidadTecnicos: {},
   geminiApiKey: '',
+  geminiModelo: '',
   avisoScriptUrl: '',
   verifactuCertificado: {
     instalado: false,

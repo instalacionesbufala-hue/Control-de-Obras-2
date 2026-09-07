@@ -68,6 +68,7 @@ Sobre la clave:
 - Se guarda en tu configuración, que se sincroniza entre tus dispositivos por la nube de tu cuenta. Solo tu cuenta puede leerla (reglas de Firestore).
 - **No se incluye** en los archivos de copia de seguridad que exportas, por si los compartes con la gestoría.
 - El nivel gratuito de Gemini da de sobra para leer tickets a diario. Si algún día quisieras limitar el gasto, en Google AI Studio puedes ver el uso y poner cuotas.
+- **El modelo se elige solo.** Google retira y renombra modelos cada pocos meses (verás mensajes del tipo "no longer available to new users"). Al pulsar **Probar**, la app le pregunta a Google qué modelos admite tu clave, se queda con el más rápido y económico que sepa leer imágenes, y lo guarda. Si algún día ese modelo desaparece, la app busca otro sola en la siguiente lectura. En Configuración puedes ver cuál se está usando y cambiarlo por otro de la lista.
 - La foto del ticket se envía a Google para leerla. Si un documento es confidencial, no uses el botón y rellena a mano.
 
 ### Consejos para que lea bien

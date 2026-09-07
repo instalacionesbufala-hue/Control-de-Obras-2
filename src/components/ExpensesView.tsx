@@ -108,7 +108,7 @@ export const ExpensesView: React.FC<Props> = ({ expenses, projects, suppliers = 
     setError(null);
     setAvisoIA(null);
     try {
-      const d: DatosTicket = await extraerDatosTicket(companySettings.geminiApiKey || '', archivoIA);
+      const { datos: d } = await extraerDatosTicket(companySettings.geminiApiKey || '', archivoIA, companySettings.geminiModelo || undefined);
       const prov = suppliers.find((s) => (d.cif && s.cif && s.cif.replace(/\W/g, '').toUpperCase() === d.cif) || (d.proveedor && s.nombre.toLowerCase() === d.proveedor.toLowerCase()));
       const metodo = METODOS.find((m) => m.toLowerCase() === (d.metodoPago || '').toLowerCase());
       setForm((x) => ({

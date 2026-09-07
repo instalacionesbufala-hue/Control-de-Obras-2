@@ -454,6 +454,7 @@ export interface CompanySettings {
   disponibilidadTecnicos?: Record<string, { manana: boolean; tarde: boolean }>;
   // Lector de tickets con IA: clave de Gemini del propio usuario (se sincroniza por su nube; nunca va en las copias exportadas)
   geminiApiKey?: string;
+  geminiModelo?: string; // el que se descubrió al probar la clave; si falta, la app lo busca sola
   // Aviso de aceptación por correo con Google Apps Script (URL /exec de la aplicación web del usuario)
   avisoScriptUrl?: string;
   verifactuCertificado: {

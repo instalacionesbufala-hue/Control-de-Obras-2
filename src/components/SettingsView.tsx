@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Settings, ShieldCheck, Building2, CheckCircle2, Save, Image, LayoutTemplate, Upload, Trash2, Plus, RefreshCw, AlertTriangle, Cloud, Link as LinkIcon, X, UserCheck, HardHat, Download, Database, Hash, FileText, CalendarDays, Info, Bell, Mail, Sparkles, Eye, EyeOff, Copy, Check } from 'lucide-react';
-import { probarClaveGemini, MODELO_GEMINI_DEFECTO } from '../lib/gemini';
+import { probarClaveGemini, ModeloGemini } from '../lib/gemini';
 import { SCRIPT_AVISO_ACEPTACION, PASOS_SCRIPT } from '../data/appsScript';
 import { CompanySettings, AppState } from '../types';
 import { DEFAULT_TEMPLATES } from '../data/plantillas';
@@ -34,6 +34,7 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
   const [copiadoScript, setCopiadoScript] = useState(false);
   const [claveVisible, setClaveVisible] = useState(false);
   const [resultadoIA, setResultadoIA] = useState<{ ok: boolean; texto: string } | null>(null);
+  const [modelosIA, setModelosIA] = useState<ModeloGemini[]>([]);
   const [dominioSinAutorizar, setDominioSinAutorizar] = useState(false);
   const dominioActual = typeof window !== 'undefined' ? window.location.hostname : '';
   const pedirNotif = async () => {
@@ -49,7 +50,10 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
     setOcupado('ia');
     setResultadoIA(null);
     try {
-      setResultadoIA({ ok: true, texto: await probarClaveGemini(f.geminiApiKey || '') });
+      const r = await probarClaveGemini(f.geminiApiKey || '');
+      setModelosIA(r.modelos);
+      set('geminiModelo', r.modelo);
+      setResultadoIA({ ok: true, texto: `${r.mensaje} Recuerda pulsar "Guardar cambios".` });
     } catch (e: any) {
       setResultadoIA({ ok: false, texto: e?.message || 'No funciona.' });
     } finally {
@@ -362,7 +366,11 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
                 <button type="button" onClick={probarIA} disabled={!f.geminiApiKey || ocupado === 'ia'} className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold cursor-pointer disabled:opacity-50">{ocupado === 'ia' ? 'Probando…' : 'Probar'}</button>
               </div>
               {resultadoIA && <p className={`text-[11px] font-bold ${resultadoIA.ok ? 'text-emerald-700' : 'text-rose-600'}`}>{resultadoIA.texto}</p>}
-              {f.geminiApiKey && <button type="button" onClick={() => { set('geminiApiKey', ''); setResultadoIA(null); }} className="text-[11px] text-rose-600 font-bold hover:underline cursor-pointer">Quitar la clave</button>}
+              {modelosIA.length > 0 && (
+                <div><label className="block font-bold text-slate-700 mb-1">Modelo que se usará</label><select value={f.geminiModelo || ''} onChange={(e) => set('geminiModelo', e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 bg-white font-mono text-[11px]">{modelosIA.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}</select><p className="text-[10px] text-slate-400 mt-1">Se ha elegido el más rápido y económico que lee imágenes. Puedes cambiarlo si prefieres otro.</p></div>
+              )}
+              {f.geminiModelo && modelosIA.length === 0 && <p className="text-[11px] text-slate-500">Modelo guardado: <span className="font-mono">{f.geminiModelo}</span></p>}
+              {f.geminiApiKey && <button type="button" onClick={() => { set('geminiApiKey', ''); set('geminiModelo', ''); setModelosIA([]); setResultadoIA(null); }} className="text-[11px] text-rose-600 font-bold hover:underline cursor-pointer">Quitar la clave</button>}
               <p className="text-[10px] text-slate-400">Es tu clave, de tu cuenta de Google: no va en el código de la app. Se guarda en tu configuración y se sincroniza entre tus dispositivos por tu nube (solo tu cuenta puede leerla). No se incluye en las copias de seguridad que exportas.</p>
             </div>
             <div className="p-4 bg-white rounded-2xl border border-slate-200 space-y-2">
@@ -373,7 +381,7 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
                 <li>Copia la clave (empieza por AIza) y pégala aquí. Pulsa <strong>Probar</strong> y luego <strong>Guardar cambios</strong>.</li>
                 <li>En Gastos → Nuevo gasto → Adjuntar, aparecerá el botón <strong>Leer los datos con IA</strong>.</li>
               </ol>
-              <p className="text-[10px] text-slate-400">La foto del ticket se envía a Google para leerla. El nivel gratuito da de sobra para el uso diario. Modelo: {MODELO_GEMINI_DEFECTO}.</p>
+              <p className="text-[10px] text-slate-400">La foto del ticket se envía a Google para leerla. El nivel gratuito da de sobra para el uso diario. La app pregunta a Google qué modelos admite tu clave y elige uno actual, así no se queda obsoleta cuando Google retira alguno.</p>
             </div>
           </div>
         </Seccion>
