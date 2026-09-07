@@ -2,6 +2,8 @@ import { parseNorma43, parseCSVBanco, leerExtracto } from '../src/lib/norma43';
 import { sha256HexUpper, VECTORES_AEAT, cadenaAlta, urlCotejoQR } from '../src/lib/verifactu';
 import { proponerCruces } from '../src/lib/conciliacion';
 import { elegirModelo } from '../src/lib/gemini';
+import { tieneDatosPropios } from '../src/lib/storage';
+import type { AppState } from '../src/types';
 
 const pad = (s: string, n: number) => s.padEnd(n, ' ').substring(0, n);
 const n43 = [
@@ -46,5 +48,29 @@ console.log('detecta N43:', leerExtracto(n43, 'x.txt').formato, '· detecta CSV:
   for (const [nombre, ids, esperado] of casos) {
     const r = elegirModelo(m(ids));
     console.log('modelo ·', nombre, r === esperado ? 'OK' : `MAL (devolvió ${r})`);
+  }
+}
+
+// ---- Primer inicio de sesión en un dispositivo nuevo ----
+// Antes, el estado recién creado con los ejemplos tenía fecha más reciente que la nube, ganaba,
+// y borraba los datos reales de la cuenta. Estas comprobaciones fijan el criterio correcto.
+{
+  const st = (extra: Partial<AppState>): AppState => ({
+    version: 4, updatedAt: new Date().toISOString(), companySettings: {} as any,
+    clients: [], projects: [], invoices: [], expenses: [], bankTransactions: [], calendarEvents: [],
+    catalogCategories: [], catalogItems: [], suppliers: [], kits: [], demoCargada: false, guiaVista: true,
+    ...extra,
+  });
+  const casos: Array<[string, AppState | null, boolean]> = [
+    ['sin estado', null, false],
+    ['recién instalado, solo ejemplos', st({ clients: [{ id: 'cli-demo-1', esDemo: true }] as any, projects: [{ id: 'obr-demo-1', esDemo: true }] as any }), false],
+    ['un cliente real', st({ clients: [{ id: 'cli-1757000000' }] as any }), true],
+    ['ejemplos y además una factura real', st({ invoices: [{ id: 'inv-demo-1', esDemo: true }, { id: 'inv-1757000001' }] as any }), true],
+    ['solo un gasto real', st({ expenses: [{ id: 'gas-1757000002' }] as any }), true],
+    ['todo vacío', st({}), false],
+  ];
+  for (const [nombre, estado, esperado] of casos) {
+    const r = tieneDatosPropios(estado);
+    console.log('datos propios ·', nombre, r === esperado ? 'OK' : `MAL (devolvió ${r})`);
   }
 }

@@ -516,6 +516,7 @@ export interface AppState {
   version: number;
   updatedAt: string;
   deviceId?: string;
+  syncUid?: string; // cuenta de Google con la que este estado se ha sincronizado alguna vez
   companySettings: CompanySettings;
   clients: Client[];
   projects: Project[];

@@ -187,6 +187,15 @@ export function guardarLocal(state: AppState): { ok: boolean; error?: string } {
   }
 }
 
+// ¿Este estado contiene trabajo real del usuario, o solo los ejemplos de bienvenida?
+// Se usa al iniciar sesión en un dispositivo nuevo para no pisar la nube con los ejemplos.
+export function tieneDatosPropios(st: AppState | null): boolean {
+  if (!st) return false;
+  const demo = (r: { id: string; esDemo?: boolean }) => !!r.esDemo || r.id.includes('-demo-') || r.id.includes('muestra');
+  const propios = (lista: Array<{ id: string; esDemo?: boolean }> | undefined) => (lista || []).some((r) => !demo(r));
+  return propios(st.clients) || propios(st.projects) || propios(st.invoices) || propios(st.expenses) || propios(st.bankTransactions) || propios(st.calendarEvents);
+}
+
 export function guardarCopiaAnterior(state: AppState) {
   try {
     localStorage.setItem(BACKUP_KEY, JSON.stringify(state));

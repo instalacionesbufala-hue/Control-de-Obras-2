@@ -17,7 +17,7 @@ import {
 
 import { auth, onAuthStateChanged, firebaseDisponible } from './lib/firebase';
 import { guardarEstadoEnNube, cargarEstadoDeNube, escucharEstadoNube } from './lib/cloudSync';
-import { cargarLocal, guardarLocal, guardarCopiaAnterior, DEFAULT_COMPANY_SETTINGS, migrarSettings, STATE_VERSION, deviceId } from './lib/storage';
+import { cargarLocal, guardarLocal, guardarCopiaAnterior, tieneDatosPropios, DEFAULT_COMPANY_SETTINGS, migrarSettings, STATE_VERSION, deviceId } from './lib/storage';
 import { escucharAceptaciones, firmaDesdeAceptacion, cerrarPropuesta, AceptacionPublica } from './lib/propuestas';
 import { numeroDocumento, uid } from './utils/formatters';
 import { hoyISO, ahoraISO } from './utils/dates';
@@ -65,6 +65,8 @@ function AppPrincipal() {
   const [showDeleteDemoModal, setShowDeleteDemoModal] = useState(false);
   const [portalProjectId, setPortalProjectId] = useState<string | null>(null);
   const [aviso, setAviso] = useState<{ texto: string; tipo: 'ok' | 'error' | 'info'; accion?: { texto: string; onClick: () => void }; fijo?: boolean } | null>(null);
+  // Datos propios a ambos lados al vincular un equipo nuevo: lo elige el usuario, no la app
+  const [conflictoInicial, setConflictoInicial] = useState<{ remoto: AppState; resumenNube: string; resumenLocal: string } | null>(null);
   const [citaPendienteDe, setCitaPendienteDe] = useState<string | null>(null); // abre "Proponer franjas" en Obras
 
   // ---------- Estado principal (se carga de localStorage o de los ejemplos) ----------
@@ -104,14 +106,16 @@ function AppPrincipal() {
   const [kits, setKits] = useState<Kit[]>(inicial.kits);
   const [demoCargada, setDemoCargada] = useState<boolean>(inicial.demoCargada);
   const [guiaVista, setGuiaVista] = useState<boolean>(inicial.guiaVista);
+  const [syncUid, setSyncUid] = useState<string | undefined>(inicial.syncUid);
   const [showOnboarding, setShowOnboarding] = useState<boolean>(!inicial.guiaVista);
 
   const estadoCompleto = useMemo<AppState>(() => ({
     version: STATE_VERSION,
     updatedAt: '',
     deviceId: deviceId(),
+    syncUid,
     companySettings, clients, projects, invoices, expenses, bankTransactions, calendarEvents, catalogCategories, catalogItems, suppliers, kits, demoCargada, guiaVista,
-  }), [companySettings, clients, projects, invoices, expenses, bankTransactions, calendarEvents, catalogCategories, catalogItems, suppliers, kits, demoCargada, guiaVista]);
+  }), [syncUid, companySettings, clients, projects, invoices, expenses, bankTransactions, calendarEvents, catalogCategories, catalogItems, suppliers, kits, demoCargada, guiaVista]);
 
   const aplicarEstado = useCallback((st: AppState) => {
     setCompanySettings(migrarSettings(st.companySettings));
@@ -173,11 +177,32 @@ function AppPrincipal() {
       try {
         const remoto = await cargarEstadoDeNube(user.uid);
         const local = cargarLocal();
-        if (remoto && (!local || (remoto.updatedAt || '') > (local.updatedAt || ''))) {
+        setSyncUid(user.uid);
+        const nubeConDatos = tieneDatosPropios(remoto);
+        const localConDatos = tieneDatosPropios(local);
+        // Este dispositivo ya venía sincronizando con esta misma cuenta: manda la fecha, como siempre.
+        const yaVinculado = !!local?.syncUid && local.syncUid === user.uid;
+        const traerNube = () => {
           guardarCopiaAnterior(local || estadoCompleto);
-          ultimoRemotoAplicado.current = remoto.updatedAt;
-          aplicarEstado(remoto);
+          ultimoRemotoAplicado.current = remoto!.updatedAt;
+          aplicarEstado({ ...remoto!, syncUid: user.uid });
           setAviso({ texto: 'Datos cargados desde la nube (versión más reciente).', tipo: 'ok' });
+        };
+
+        if (!remoto) {
+          // Primera vez con esta cuenta: lo que haya aquí pasa a ser el origen
+          pendienteSubida.current = true;
+        } else if (yaVinculado) {
+          if ((remoto.updatedAt || '') > (local!.updatedAt || '')) traerNube();
+          else pendienteSubida.current = true;
+        } else if (nubeConDatos && !localConDatos) {
+          // Dispositivo nuevo, aún con los ejemplos: la nube gana siempre, sin mirar fechas.
+          // Antes ganaba lo local por tener la fecha más reciente y borraba los datos de la cuenta.
+          traerNube();
+        } else if (nubeConDatos && localConDatos) {
+          // Hay trabajo real en los dos lados y este equipo no estaba vinculado: decide el usuario.
+          guardarCopiaAnterior(local || estadoCompleto);
+          setConflictoInicial({ remoto, resumenNube: resumenEstado(remoto), resumenLocal: resumenEstado(local!) });
         } else {
           pendienteSubida.current = true;
         }
@@ -308,6 +333,12 @@ function AppPrincipal() {
   const [showNewInvoiceModal, setShowNewInvoiceModal] = useState(false);
   const [showNewExpenseModal, setShowNewExpenseModal] = useState(false);
   const [preselectedProjectForInvoice, setPreselectedProjectForInvoice] = useState<Project | null>(null);
+
+  const resumenEstado = (st: AppState) => {
+    const n = (l?: unknown[]) => (l || []).length;
+    const f = st.updatedAt ? new Date(st.updatedAt).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : 'sin fecha';
+    return `${n(st.clients)} clientes · ${n(st.projects)} presupuestos y obras · ${n(st.invoices)} facturas · ${n(st.expenses)} gastos · guardado el ${f}`;
+  };
 
   const irA = (tab: string) => {
     setActiveTab(tab);
@@ -799,6 +830,26 @@ function AppPrincipal() {
             )}
           </div>
         </header>
+
+        {conflictoInicial && (
+          <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center"><AlertTriangle size={24} /></div>
+              <div className="space-y-1">
+                <h3 className="text-base font-black text-slate-900">Hay datos en este dispositivo y en la nube</h3>
+                <p className="text-xs text-slate-500">Es la primera vez que vinculas esta cuenta aquí y las dos partes tienen trabajo tuyo. Elige con cuál te quedas; la otra versión queda guardada como copia de seguridad y puedes recuperarla en Configuración.</p>
+              </div>
+              <div className="space-y-2 text-xs">
+                <div className="p-3 rounded-2xl border border-slate-200 bg-slate-50"><p className="font-black text-slate-800">En la nube (tu cuenta de Google)</p><p className="text-slate-500 mt-0.5">{conflictoInicial.resumenNube}</p></div>
+                <div className="p-3 rounded-2xl border border-slate-200 bg-slate-50"><p className="font-black text-slate-800">En este dispositivo</p><p className="text-slate-500 mt-0.5">{conflictoInicial.resumenLocal}</p></div>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <button onClick={() => { const r = conflictoInicial.remoto; ultimoRemotoAplicado.current = r.updatedAt; aplicarEstado(r); setConflictoInicial(null); setAviso({ texto: 'Se han cargado los datos de la nube. La versión de este dispositivo queda como copia de seguridad.', tipo: 'ok' }); }} className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs cursor-pointer">Quedarme con los de la nube</button>
+                <button onClick={() => { pendienteSubida.current = true; setConflictoInicial(null); setAviso({ texto: 'Se conservan los datos de este dispositivo y se subirán a la nube.', tipo: 'info' }); }} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-bold text-xs cursor-pointer">Quedarme con los de este dispositivo</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {aviso && (
           <div className={`mx-4 lg:mx-8 mt-3 p-3 rounded-2xl border text-xs font-bold flex items-center gap-2 ${aviso.tipo === 'ok' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : aviso.tipo === 'error' ? 'bg-rose-50 border-rose-200 text-rose-800' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>

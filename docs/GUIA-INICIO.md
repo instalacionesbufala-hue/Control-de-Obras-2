@@ -95,6 +95,21 @@ El botón **PDF** descarga el archivo sin enviar nada. **Imprimir / PDF** sigue 
 - En **Configuración → Técnicos y franjas** puedes quitar la franja de mañana o de tarde para toda la empresa o solo para un técnico. La agenda solo ofrece huecos que alguien cubra.
 - Avisos de aceptación y lector de tickets con IA: ver `docs/AVISOS-Y-LECTOR-IA.md`.
 
+## Usar la app en varios dispositivos
+
+Basta con abrir la web y pulsar **Vincular cuenta de Google** con la misma cuenta. Todo lo tuyo viaja en la nube de tu cuenta: clientes, presupuestos, obras, facturas, gastos, banco, catálogo, kits y **toda la configuración**, incluidas la clave de Gemini, el modelo elegido y la dirección del script de avisos. No hay que volver a escribir nada.
+
+Dos cosas son de cada dispositivo por diseño y no se sincronizan:
+
+- **El permiso de Google Calendar y Gmail**, que dura una hora y se pide solo cuando lo necesitas. Es así porque el permiso va ligado a la sesión del navegador.
+- **El permiso de avisos del navegador**, que concedes una vez en cada móvil u ordenador desde Configuración → Avisos.
+
+Qué pasa la primera vez que vinculas la cuenta en un equipo nuevo:
+
+- Si en el equipo solo están los ejemplos de bienvenida, se cargan tus datos de la nube sin preguntar.
+- Si en el equipo ya habías metido trabajo real **y** en la nube también hay datos, la app se detiene y te muestra un resumen de cada versión para que elijas. La descartada queda como copia de seguridad recuperable en Configuración.
+- Si la nube está vacía porque es tu primera vez con esa cuenta, se sube lo que tengas en el equipo.
+
 ## Enlace de aceptación para el cliente
 
 Al enviar un presupuesto con la cuenta de Google vinculada, la app publica en Firestore un documento con un identificador aleatorio (sin costes internos) y genera el enlace `…/?aceptar=TOKEN`. El cliente:
