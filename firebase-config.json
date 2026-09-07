@@ -1,12 +1,10 @@
-{
-  "projectId": "gen-lang-client-0758030321",
-  "appId": "1:927330908896:web:7e8a95048a4631d53d2e85",
-  "apiKey": "AIzaSyDSe0xswQS5ItOBhS2HcuZBOTgcSfq8Bq8",
-  "authDomain": "gen-lang-client-0758030321.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-obracontrolerpco-8c5ffacf-218f-4043-be06-b3111f04385d",
-  "storageBucket": "gen-lang-client-0758030321.firebasestorage.app",
-  "messagingSenderId": "927330908896",
-  "measurementId": "",
-  "oAuthClientId": "927330908896-3jglog3a58utk0vdu0e9o4la0c8sgsl0.apps.googleusercontent.com",
-  "recaptchaSiteKey": ""
-}
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyD6pDjZKSa0HNpEh7Gy4jKBzREhd1kAC7Y",
+  authDomain: "control-de-obras-8f91f.firebaseapp.com",
+  projectId: "control-de-obras-8f91f",
+  storageBucket: "control-de-obras-8f91f.firebasestorage.app",
+  messagingSenderId: "116306549366",
+  appId: "1:116306549366:web:ccf667d87ef8723a641d57",
+  measurementId: "G-PDSBB9Y2G1"
+};
