@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Printer, X, ShieldCheck, CheckCircle2, FileText, Phone, Mail, PenTool, Download, Share2, Send, AlertCircle, RefreshCcw } from 'lucide-react';
 import { rellenarTexto } from '../lib/textos';
 import { generarPDFDesdeElemento, descargarBlob, puedeCompartirArchivos, compartirPDF, nombreArchivoPDF } from '../lib/pdf';
@@ -438,8 +439,10 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
     </>
   );
 
-  const documento = (
-          <div id={embebido ? 'documento-muestra' : 'documento-imprimible'} className={`w-full max-w-[800px] shadow-2xl print:shadow-none print:max-w-none ${isDark ? 'bg-slate-950 text-slate-100 border border-slate-800' : 'bg-white text-slate-900'}`} style={{ fontFamily: activeFont, borderRadius: currentTemplate === 'compacta' ? '4px' : '16px' }}>
+  // El documento se pinta con un id distinto según dónde vaya: vista previa (lo que rasteriza el PDF),
+  // muestra de plantillas, o la copia limpia que se imprime.
+  const documento = (idDoc: string) => (
+          <div id={idDoc} className={`w-full max-w-[800px] shadow-2xl print:shadow-none print:max-w-none ${isDark ? 'bg-slate-950 text-slate-100 border border-slate-800' : 'bg-white text-slate-900'}`} style={{ fontFamily: activeFont, borderRadius: currentTemplate === 'compacta' ? '4px' : '16px' }}>
             {currentTemplate === 'moderna' && (
               <div className="space-y-6">
                 <div className="p-8 text-white flex flex-col sm:flex-row justify-between items-start gap-4 rounded-t-2xl" style={{ backgroundColor: accentColor }}>
@@ -518,10 +521,16 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
           </div>
   );
 
-  if (embebido) return <div className="w-full flex justify-center">{documento}</div>;
+  if (embebido) return <div className="w-full flex justify-center">{documento('documento-muestra')}</div>;
+
+  // Para imprimir no se usa el modal: se cuelga una copia del documento directamente en <body>,
+  // fuera del marco de la app (alto fijo, desenfoque, scroll). En pantalla no se ve; al imprimir
+  // se oculta la app y se imprime solo esta copia. Así no hay nada que recorte ni descoloque.
+  const copiaImpresion = createPortal(<div id="zona-impresion" aria-hidden="true">{documento('documento-impresion')}</div>, document.body);
 
   return (
-    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto print:static print:bg-white print:p-0">
+    <>
+    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto">
       <div className="bg-slate-100 rounded-3xl max-w-5xl w-full max-h-[96vh] flex flex-col shadow-2xl overflow-hidden print:max-h-none print:shadow-none print:rounded-none print:bg-white">
         {/* Barra de controles */}
         <div className="p-3 sm:p-4 bg-slate-950 text-white flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 print:hidden">
@@ -567,9 +576,11 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
 
         {/* Documento */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-8 flex justify-center items-start bg-slate-200/80 print:p-0 print:bg-white print:overflow-visible">
-          {documento}
+          {documento('documento-imprimible')}
         </div>
       </div>
     </div>
+      {copiaImpresion}
+    </>
   );
 };
