@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { BarChart3, Download, CheckCircle2, Building2, UserCheck, AlertTriangle, PiggyBank, FileSpreadsheet, Settings as SettingsIcon, ShieldCheck } from 'lucide-react';
+import { BarChart3, Download, CheckCircle2, Building2, UserCheck, AlertTriangle, PiggyBank, FileSpreadsheet, Settings as SettingsIcon, ShieldCheck, FileCode2, AlertCircle } from 'lucide-react';
 import { Invoice, Expense, CompanySettings, BankTransaction } from '../types';
 import { formatCurrency } from '../utils/formatters';
 import { HaciendaCountdownWidget } from './HaciendaCountdownWidget';
 import { modelosAplicables, cuotaSociedadesEstimada, tiposSociedadesMicro } from '../lib/fiscal';
 import { aniosDisponibles, trimestreDe, anioActual, fechaES } from '../utils/dates';
 import { csvLibroEmitidas, fechaAEAT, dec2 } from '../lib/verifactu';
+import { xmlLote, xmlDeFactura, anteriorDe, pendientesDeEnvio, avisosPrevios, MAX_REGISTROS_LOTE } from '../lib/verifactuXml';
 import { descargarArchivo } from '../lib/googleCalendar';
 
 interface Props {
@@ -14,11 +15,13 @@ interface Props {
   companySettings: CompanySettings;
   bankTransactions: BankTransaction[];
   onNavigate?: (tab: string) => void;
+  onUpdateInvoice?: (id: string, campos: Partial<Invoice>) => void;
+  onAviso?: (texto: string, tipo?: 'ok' | 'error' | 'info') => void;
 }
 
 type Q = 1 | 2 | 3 | 4 | 'ANUAL';
 
-export const TaxClosingView: React.FC<Props> = ({ invoices, expenses, companySettings, bankTransactions, onNavigate }) => {
+export const TaxClosingView: React.FC<Props> = ({ invoices, expenses, companySettings, bankTransactions, onNavigate, onUpdateInvoice, onAviso }) => {
   const anios = aniosDisponibles([...invoices.map((i) => i.fecha), ...expenses.map((e) => e.fecha)]);
   const [anio, setAnio] = useState<string>(String(anioActual()));
   const [q, setQ] = useState<Q>(trimestreDe(new Date().toISOString().split('T')[0]));
@@ -82,6 +85,36 @@ export const TaxClosingView: React.FC<Props> = ({ invoices, expenses, companySet
   };
 
   const etiquetaQ = q === 'ANUAL' ? `Año ${anio}` : `${q}T ${anio}`;
+
+  // ---- Registros para la AEAT ----
+  // El XML es el mismo lo remita la gestoría, un servidor propio o una pasarela. Aquí se
+  // genera; el envío en sí necesita certificado digital y no puede hacerse desde el navegador.
+  const registrosDelPeriodo = useMemo(() => s.inv.filter((i) => i.verifactu?.registrada && i.verifactu.cadena), [s.inv]);
+  const listaPendientes = useMemo(() => pendientesDeEnvio(invoices), [invoices]);
+  const avisosLote = useMemo(() => [...new Set(listaPendientes.flatMap((i) => avisosPrevios(i, companySettings)))], [listaPendientes, companySettings]);
+
+  const descargarXmlPeriodo = () => {
+    if (!registrosDelPeriodo.length) return onAviso?.('No hay registros con huella en este periodo.', 'info');
+    descargarArchivo(`Registros_AEAT_${q}_${anio}.xml`, xmlLote(registrosDelPeriodo, invoices, companySettings), 'application/xml;charset=utf-8');
+  };
+
+  const descargarLotePendiente = () => {
+    if (!listaPendientes.length) return;
+    descargarArchivo(`Registros_AEAT_pendientes_${listaPendientes.length}.xml`, xmlLote(listaPendientes, invoices, companySettings), 'application/xml;charset=utf-8');
+    onAviso?.(`Lote de ${listaPendientes.length} registros descargado. No se ha enviado nada: el fichero es para tu gestoría o para el envío con certificado.`, 'info');
+  };
+
+  const descargarXmlFactura = (inv: Invoice) => descargarArchivo(`Registro_AEAT_${inv.numero.replace(/[^\w-]/g, '_')}.xml`, xmlDeFactura(inv, anteriorDe(inv, invoices), companySettings), 'application/xml;charset=utf-8');
+
+  // Marcar como enviado es una anotación manual: la app no envía nada por su cuenta.
+  const marcarLoteEnviado = () => {
+    if (!listaPendientes.length || !onUpdateInvoice) return;
+    const csv = prompt(`Vas a marcar ${listaPendientes.length} ${listaPendientes.length === 1 ? 'registro' : 'registros'} como enviados a la AEAT. Esto solo anota lo que ya has hecho por otro medio: la app no envía nada.\n\nCSV o referencia que devolvió la AEAT (opcional):`);
+    if (csv === null) return;
+    const fecha = new Date().toISOString();
+    listaPendientes.forEach((inv) => onUpdateInvoice(inv.id, { verifactu: { ...inv.verifactu, estadoEnvio: 'enviado', fechaEnvio: fecha, csvAEAT: csv || inv.verifactu.csvAEAT } }));
+    onAviso?.(`${listaPendientes.length} ${listaPendientes.length === 1 ? 'registro anotado' : 'registros anotados'} como enviados.`, 'ok');
+  };
 
   return (
     <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto">
@@ -158,8 +191,8 @@ export const TaxClosingView: React.FC<Props> = ({ invoices, expenses, companySet
           <h2 className="font-black text-slate-900 text-base flex items-center gap-2"><FileSpreadsheet className="text-blue-600" size={20} /> Para la gestoría · {etiquetaQ}</h2>
           {entregados[claveEntrega] ? <span className="text-xs font-bold text-emerald-700 flex items-center gap-1"><CheckCircle2 size={14} /> Entregado el {fechaES(entregados[claveEntrega].split('T')[0])}</span> : <button onClick={marcarEntregado} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold cursor-pointer">Marcar como entregado</button>}
         </div>
-        <p className="text-xs text-slate-500">Tres archivos CSV (se abren en Excel) con datos reales. No incluyen ninguna estimación de impuestos.</p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <p className="text-xs text-slate-500">Cuatro archivos con datos reales: tres CSV que se abren en Excel y el XML de los registros VERI*FACTU. No incluyen ninguna estimación de impuestos.</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
           <button onClick={descargarLibroEmitidas} className="p-4 text-left bg-slate-50 hover:bg-blue-50 border border-slate-200 rounded-2xl cursor-pointer transition-colors">
             <div className="flex items-center justify-between"><p className="font-bold text-slate-900 text-sm">1. Facturas emitidas</p><Download size={16} className="text-blue-600" /></div>
             <p className="text-[11px] text-slate-500 mt-1">{s.inv.length} facturas · base {formatCurrency(s.baseVentas)} · con huella VERI*FACTU</p>
@@ -172,8 +205,51 @@ export const TaxClosingView: React.FC<Props> = ({ invoices, expenses, companySet
             <div className="flex items-center justify-between"><p className="font-bold text-slate-900 text-sm">3. Extracto conciliado</p><Download size={16} className="text-blue-600" /></div>
             <p className="text-[11px] text-slate-500 mt-1">Movimientos del banco con el documento al que se cruzó cada uno</p>
           </button>
+          <button onClick={descargarXmlPeriodo} className="p-4 text-left bg-slate-50 hover:bg-blue-50 border border-slate-200 rounded-2xl cursor-pointer transition-colors">
+            <div className="flex items-center justify-between"><p className="font-bold text-slate-900 text-sm">4. Registros VERI*FACTU (XML)</p><Download size={16} className="text-blue-600" /></div>
+            <p className="text-[11px] text-slate-500 mt-1">{registrosDelPeriodo.length} {registrosDelPeriodo.length === 1 ? 'registro' : 'registros'} con huella · formato oficial de la AEAT</p>
+          </button>
         </div>
         <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-[11px] text-slate-600 flex items-start gap-2"><ShieldCheck size={14} className="text-slate-500 shrink-0 mt-0.5" /><span>Los PDF de las facturas se generan desde la pestaña Facturas (Imprimir / PDF). Pregunta por escrito a tu gestoría qué formato prefiere y si acepta un programa de facturación propio con VERI*FACTU.</span></div>
+      </div>
+
+
+      {/* PENDIENTES DE ENVÍO A LA AEAT */}
+      <div className={`bg-white p-6 rounded-3xl border shadow-xs space-y-4 ${listaPendientes.length ? 'border-amber-200' : 'border-slate-200/80'}`}>
+        <div className="flex items-center gap-3">
+          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${listaPendientes.length ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'}`}><FileCode2 size={20} /></div>
+          <div>
+            <h2 className="font-black text-slate-900 text-base">{listaPendientes.length ? `${listaPendientes.length} ${listaPendientes.length === 1 ? 'registro pendiente' : 'registros pendientes'} de envío a la AEAT` : 'Nada pendiente de envío a la AEAT'}</h2>
+            <p className="text-xs text-slate-500">Aquí se cuentan todos los periodos, no solo {etiquetaQ}: la remisión no va por trimestres, va factura a factura.</p>
+          </div>
+        </div>
+        {listaPendientes.length > 0 && (
+          <>
+            {avisosLote.length > 0 && (
+              <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-900 space-y-1">
+                <p className="font-bold flex items-center gap-1.5"><AlertCircle size={14} /> Corrige esto antes de entregar el fichero</p>
+                {avisosLote.map((a, i) => <p key={i} className="text-[11px]">· {a}</p>)}
+              </div>
+            )}
+            <div className="border border-slate-200 rounded-2xl divide-y divide-slate-100 max-h-72 overflow-y-auto">
+              {listaPendientes.map((inv) => (
+                <div key={inv.id} className="p-3 flex items-center justify-between gap-3 text-xs">
+                  <div className="min-w-0">
+                    <p className="font-bold text-slate-900 truncate">{inv.numero} · {inv.clienteNombre}</p>
+                    <p className="text-[11px] text-slate-500">{fechaES(inv.fecha)} · {formatCurrency(inv.total)} · {inv.estado === 'Anulada' ? 'registro de anulación' : `tipo ${inv.verifactu.tipoFactura}`}</p>
+                  </div>
+                  <button type="button" onClick={() => descargarXmlFactura(inv)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold text-[11px] flex items-center gap-1.5 cursor-pointer shrink-0"><Download size={12} /> XML</button>
+                </div>
+              ))}
+            </div>
+            {listaPendientes.length > MAX_REGISTROS_LOTE && <p className="text-[11px] text-slate-500">El lote se limita a {MAX_REGISTROS_LOTE} registros, que es el máximo que admite la AEAT por envío. Descarga, marca como enviados y repite.</p>}
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={descargarLotePendiente} className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer"><Download size={14} /> Descargar el lote pendiente en XML</button>
+              {onUpdateInvoice && <button type="button" onClick={marcarLoteEnviado} className="px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer"><CheckCircle2 size={14} /> {listaPendientes.length === 1 ? 'Marcar el registro como enviado' : `Marcar los ${listaPendientes.length} como enviados`}</button>}
+            </div>
+          </>
+        )}
+        <p className="text-[11px] text-slate-500">La app genera el fichero, no lo envía: la remisión exige firmar con tu certificado digital y eso no puede hacerse desde el navegador. El XML sigue los esquemas SuministroLR de la AEAT y lleva la huella encadenada de cada factura; antes de usarlo contra producción conviene validarlo en el entorno de pruebas. Marcar como enviado solo anota lo que ya has hecho por otro medio.</p>
       </div>
 
       {/* MODELOS */}

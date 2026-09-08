@@ -25,6 +25,7 @@ El repositorio incluye `.github/workflows/deploy.yml`: al subir a `main` se cons
 - `docs/AVISOS-Y-LECTOR-IA.md`: cómo te llega la aceptación del cliente (aviso en la app, script de Google para el correo) y cómo activar el lector de tickets con tu clave de Gemini.
 - `docs/ESTUDIO-SINCRONIZACION-BANCARIA.md`: opciones para leer los movimientos del banco (Norma 43 implementado; PSD2 requiere servidor) y cómo funcionan las propuestas de cruce.
 - `docs/PROYECTO-FIREBASE-PROPIO.md`: crear tu propio proyecto de Firebase (independiente de Google AI Studio), autorizar el dominio y las dos formas de venderla a clientes.
+- `docs/ENVIO-AEAT.md`: qué genera la app (el XML oficial del registro) y qué no puede hacer (enviarlo), las fechas de obligación, cómo se usa el panel de pendientes y quién puede remitirlos.
 - `docs/PROTECCION-DE-DATOS.md`: por qué se informa al cliente en vez de pedirle consentimiento, qué datos se guardan y cuánto, la firma dibujada, los encargados del tratamiento y lo que aún tienes que hacer tú (registro de actividades, contrato con la gestoría).
 - `firestore.rules`: reglas de seguridad que hay que publicar en Firestore.
 

@@ -6,7 +6,8 @@ import { tieneDatosPropios } from '../src/lib/storage';
 import { separarCatalogo, actualizarCosteEnKits, margenDe } from '../src/lib/catalogo';
 import { conCobro, sinCobro, totalCobrado, pendienteDe, situacionDe, estadoSegunCobros, resumenCobros } from '../src/lib/cobros';
 import { consumoDesdePresupuesto, consumoActualizado, costeRealMateriales, costePrevistoMateriales, desviaciones, resumenObra } from '../src/lib/consumo';
-import type { AppState } from '../src/types';
+import { xmlDeFactura, xmlLote, desgloseDe, pendientesDeEnvio, avisosPrevios } from '../src/lib/verifactuXml';
+import type { AppState, Invoice, CompanySettings } from '../src/types';
 
 const pad = (s: string, n: number) => s.padEnd(n, ' ').substring(0, n);
 const n43 = [
@@ -182,4 +183,80 @@ console.log('detecta N43:', leerExtracto(n43, 'x.txt').formato, '· detecta CSV:
 
   const r = resumenObra({ ...obra, consumoReal: conExtra, consumoCerrado: true });
   console.log('consumo · el margen usa el coste real al cerrar', r.margen === Math.round(((1000 - r.real) / 1000) * 100 * 100) / 100 ? 'OK' : `MAL (${r.margen})`);
+}
+
+// ---- XML de los registros para la AEAT ----
+// El XML es lo mismo lo envíe la gestoría, un servidor propio o una pasarela. Aquí se comprueba
+// que sale bien formado, que el desglose agrupa por tipo de IVA y que el encadenamiento distingue
+// el primer registro de los siguientes.
+{
+  const settings = { razonSocial: 'Charge by César SL', nombreComercial: 'Charge by César', cif: 'B-12345674' } as CompanySettings;
+  const base = (numero: string, huella: string, hashAnterior: string, hora: string): Invoice => ({
+    id: numero, numero, fecha: '2026-09-05', fechaVencimiento: '2026-10-05',
+    clienteId: 'c1', clienteNombre: 'Laura Martín', clienteNif: '24.567.890-K', clienteDireccion: 'Granada',
+    lineas: [
+      { id: 'l1', concepto: 'Punto de recarga', cantidad: 1, precioUnitario: 1000, ivaPorcentaje: 21, total: 1000 },
+      { id: 'l2', concepto: 'Cableado', cantidad: 2, precioUnitario: 100, ivaPorcentaje: 21, total: 200 },
+      { id: 'l3', concepto: 'Certificado', cantidad: 1, precioUnitario: 100, ivaPorcentaje: 10, total: 100 },
+    ],
+    baseImponible: 1300, ivaTotal: 262, total: 1562, estado: 'Pendiente',
+    metodoPago: 'Transferencia Bancaria',
+    verifactu: {
+      registrada: true, tipoFactura: 'F1', fechaHoraHuso: hora, cadena: 'x', huellaHash: huella,
+      hashAnterior, codigoQR: 'https://x', sistemaEmisor: 'Control de Obra', estadoEnvio: 'pendiente',
+    },
+  } as Invoice);
+
+  const f1 = base('F2026-0001', 'AAA', '', '2026-09-05T10:00:00+02:00');
+  const f2 = base('F2026-0002', 'BBB', 'AAA', '2026-09-05T11:00:00+02:00');
+  const enviada = { ...base('F2026-0003', 'CCC', 'BBB', '2026-09-05T12:00:00+02:00') };
+  enviada.verifactu = { ...enviada.verifactu, estadoEnvio: 'enviado' };
+  const todas = [f2, enviada, f1]; // desordenadas a propósito
+
+  // Comprobación de buena formación: cada etiqueta que se abre se cierra en el orden correcto.
+  const bienFormado = (xml: string) => {
+    const pila: string[] = [];
+    for (const [, cierre, nombre, fin] of xml.matchAll(/<(\/?)([A-Za-z][\w:.-]*)[^>]*?(\/?)>/g)) {
+      if (nombre.startsWith('?') || fin === '/') continue;
+      if (cierre === '/') { if (pila.pop() !== nombre) return false; } else pila.push(nombre);
+    }
+    return pila.length === 0;
+  };
+
+  const d = desgloseDe(f1);
+  const xml1 = xmlDeFactura(f1, null, settings);
+  const xml2 = xmlDeFactura(f2, { numero: f1.numero, fecha: f1.fecha, huella: 'AAA' }, settings);
+  const lote = xmlLote(pendientesDeEnvio(todas), todas, settings);
+
+  const pruebas: Array<[string, boolean]> = [
+    ['el desglose agrupa por tipo de IVA', d.length === 2],
+    ['suma las bases del mismo tipo', d.find((l) => l.tipo === 21)!.base === 1200],
+    ['calcula la cuota de cada tipo', Math.round(d.find((l) => l.tipo === 10)!.cuota * 100) / 100 === 10],
+    ['la primera factura se marca como primer registro', xml1.includes('<sum1:PrimerRegistro>S</sum1:PrimerRegistro>')],
+    ['la segunda cita a la anterior por número y huella', xml2.includes('<sum1:NumSerieFactura>F2026-0001</sum1:NumSerieFactura>') && xml2.includes('<sum1:Huella>AAA</sum1:Huella>')],
+    ['la segunda no se declara primer registro', !xml2.includes('PrimerRegistro')],
+    ['la fecha va en formato AEAT', xml1.includes('<sum1:FechaExpedicionFactura>05-09-2026</sum1:FechaExpedicionFactura>')],
+    ['el NIF del cliente va sin puntos ni guiones', xml1.includes('<sum1:NIF>24567890K</sum1:NIF>')],
+    ['lleva la huella y el tipo de huella', xml1.includes('<sum1:TipoHuella>01</sum1:TipoHuella>') && xml1.includes('<sum1:Huella>AAA</sum1:Huella>')],
+    ['el importe total sale con dos decimales', xml1.includes('<sum1:ImporteTotal>1562.00</sum1:ImporteTotal>')],
+    ['el XML queda bien formado', bienFormado(xml1) && bienFormado(lote)],
+    ['el lote solo lleva lo pendiente', (lote.match(/<sum:RegistroFactura>/g) || []).length === 2],
+    ['el lote respeta el orden de la cadena', lote.indexOf('F2026-0001') < lote.indexOf('F2026-0002')],
+    ['un solo obligado emisor por lote', (lote.match(/<sum1:ObligadoEmision>/g) || []).length === 1],
+    ['sin datos de empresa avisa', avisosPrevios(f1, {} as CompanySettings).length === 2],
+    ['con los datos completos no avisa', avisosPrevios(f1, settings).length === 0],
+  ];
+  for (const [nombre, ok] of pruebas) console.log('xml AEAT ·', nombre, ok ? 'OK' : 'MAL');
+
+  // Inversión del sujeto pasivo: calificación S2 y sin cuota repercutida.
+  const isp = { ...f1, inversionSujetoPasivo: true };
+  const xmlIsp = xmlDeFactura(isp, null, settings);
+  console.log('xml AEAT · con inversión del sujeto pasivo no repercute cuota',
+    xmlIsp.includes('<sum1:CalificacionOperacion>S2</sum1:CalificacionOperacion>') && !xmlIsp.includes('CuotaRepercutida') && xmlIsp.includes('<sum1:CuotaTotal>0.00</sum1:CuotaTotal>') ? 'OK' : 'MAL');
+
+  // Una factura anulada genera registro de anulación, no de alta.
+  const anulada = { ...f2, estado: 'Anulada' as const };
+  const xmlAnu = xmlDeFactura(anulada, null, settings);
+  console.log('xml AEAT · la factura anulada genera registro de anulación',
+    xmlAnu.includes('<sum1:RegistroAnulacion>') && !xmlAnu.includes('<sum1:RegistroAlta>') && xmlAnu.includes('<sum1:NumSerieFacturaAnulada>F2026-0002</sum1:NumSerieFacturaAnulada>') ? 'OK' : 'MAL');
 }

@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { BadgeEuro, Plus, Download, Search, ShieldCheck, Eye, MessageSquare, X, AlertCircle, Send, Trash2, CheckCircle2, Copy, Check, FileText, Ban, RefreshCcw } from 'lucide-react';
+import { BadgeEuro, Plus, Download, Search, ShieldCheck, Eye, MessageSquare, X, AlertCircle, Send, Trash2, CheckCircle2, Copy, Check, FileText, Ban, RefreshCcw, ArrowRight } from 'lucide-react';
 import { DocumentRenderer } from './DocumentRenderer';
 import { PeriodFilter } from './PeriodFilter';
 import { Invoice, Client, Project, CompanySettings, InvoiceLine, TipoFacturaVerifactu, CobroFactura } from '../types';
@@ -7,6 +7,7 @@ import { formatCurrency, formatDate, uid, telefonoWhatsApp, redondear2 } from '.
 import { PeriodoFiltro, periodoActual, coincidePeriodo, aniosDisponibles, hoyISO, addDays, etiquetaPeriodo } from '../utils/dates';
 import { generarRegistroAlta, verificarCadena, csvLibroEmitidas, autocomprobarAlgoritmo, TIPOS_RECTIFICATIVA } from '../lib/verifactu';
 import { totalCobrado, pendienteDe, situacionDe, diasVencida, textoReclamacion } from '../lib/cobros';
+import { xmlDeFactura, anteriorDe, pendientesDeEnvio } from '../lib/verifactuXml';
 import { descargarArchivo } from '../lib/googleCalendar';
 
 interface Props {
@@ -20,6 +21,7 @@ interface Props {
   onRegistrarCobro: (invoiceId: string, cobro: CobroFactura) => void;
   onQuitarCobro: (invoiceId: string, cobroId: string) => void;
   onIrABanco?: () => void;
+  onIrAGestoria?: () => void;
   onUpdateInvoiceStatus: (id: string, estado: Invoice['estado']) => void;
   onUpdateInvoice: (id: string, campos: Partial<Invoice>) => void;
   showNewInvoiceModal: boolean;
@@ -30,7 +32,7 @@ interface Props {
 
 type LineaForm = { id: string; concepto: string; cantidad: number; unidad: string; precioUnitario: number; ivaPorcentaje: number; materialesVisibles?: InvoiceLine['materialesVisibles'] };
 
-export const SalesView: React.FC<Props> = ({ invoices, clients, projects, companySettings, siguienteNumero, siguienteNumeroRectificativa, onCreateInvoice, onRegistrarCobro, onQuitarCobro, onIrABanco, onUpdateInvoiceStatus, onUpdateInvoice, showNewInvoiceModal, setShowNewInvoiceModal, preselectedProject, onAviso }) => {
+export const SalesView: React.FC<Props> = ({ invoices, clients, projects, companySettings, siguienteNumero, siguienteNumeroRectificativa, onCreateInvoice, onRegistrarCobro, onQuitarCobro, onIrABanco, onIrAGestoria, onUpdateInvoiceStatus, onUpdateInvoice, showNewInvoiceModal, setShowNewInvoiceModal, preselectedProject, onAviso }) => {
   const [periodo, setPeriodo] = useState<PeriodoFiltro>(periodoActual());
   const [busqueda, setBusqueda] = useState('');
   const [estadoFiltro, setEstadoFiltro] = useState('todos');
@@ -298,7 +300,8 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
   const totalIva = activas.reduce((a, i) => a + i.ivaTotal, 0);
   const pendiente = activas.filter((i) => i.estado === 'Pendiente' || i.estado === 'Vencida').reduce((a, i) => a + i.total, 0);
   const registradas = invoices.filter((i) => i.verifactu?.registrada && i.verifactu.cadena).length;
-  const pendientesEnvio = invoices.filter((i) => i.verifactu?.registrada && i.verifactu.estadoEnvio === 'pendiente').length;
+  // Mismo criterio que el panel de abajo: solo cuenta lo que tiene registro generado de verdad.
+  const pendientesEnvio = pendientesDeEnvio(invoices).length;
 
 
   const mensajeWhatsApp = (inv: Invoice) => `Hola ${inv.clienteNombre}, le enviamos la factura ${inv.numero} por ${formatCurrency(inv.total)} (IVA incluido)${inv.obraNombre ? ` correspondiente a "${inv.obraNombre}"` : ''}.\nForma de pago: ${inv.metodoPago}${companySettings.ibanPrincipal ? `\nIBAN: ${companySettings.ibanPrincipal}` : ''}\nVencimiento: ${formatDate(inv.fechaVencimiento)}\n\nGracias por su confianza.\n${companySettings.nombreComercial || companySettings.razonSocial}`;
@@ -306,6 +309,13 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
   const exportarCSV = () => descargarArchivo(`Facturas_emitidas_${periodo.mes}_${periodo.anio}.csv`, csvLibroEmitidas(activas), 'text/csv;charset=utf-8');
   const verificar = async () => setVerificacion(await verificarCadena(invoices));
 
+  // Registros con huella generada que todavía no constan enviados a la AEAT.
+  const listaPendientes = useMemo(() => pendientesDeEnvio(invoices), [invoices]);
+
+  const descargarXmlFactura = (inv: Invoice) => {
+    const xml = xmlDeFactura(inv, anteriorDe(inv, invoices), companySettings);
+    descargarArchivo(`Registro_AEAT_${inv.numero.replace(/[^\w-]/g, '_')}.xml`, xml, 'application/xml;charset=utf-8');
+  };
   return (
     <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -327,8 +337,11 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
         <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs">
           <div className="flex items-center justify-between mb-2"><span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">VERI*FACTU</span><span className="p-2 rounded-xl bg-emerald-50 text-emerald-600"><ShieldCheck size={16} /></span></div>
           <p className="text-xl font-black text-emerald-900">{registradas} <span className="text-sm text-slate-400 font-bold">con huella</span></p>
-          <p className="text-[11px] mt-1 font-medium text-slate-500">{pendientesEnvio > 0 ? `${pendientesEnvio} pendientes de envío a la AEAT` : 'Nada pendiente de envío'}{algoritmoOk === false ? ' · ⚠ algoritmo no verificado' : ''}</p>
-          <button onClick={verificar} className="text-[11px] font-bold text-blue-600 hover:underline mt-1 cursor-pointer">Comprobar encadenamiento</button>
+          <p className="text-[11px] mt-1 font-medium text-slate-500">{pendientesEnvio > 0 ? `${pendientesEnvio} ${pendientesEnvio === 1 ? 'pendiente' : 'pendientes'} de envío a la AEAT` : 'Nada pendiente de envío'}{algoritmoOk === false ? ' · ⚠ algoritmo no verificado' : ''}</p>
+          <div className="flex flex-col items-start gap-0.5 mt-1">
+            <button onClick={verificar} className="text-[11px] font-bold text-blue-600 hover:underline cursor-pointer">Comprobar encadenamiento</button>
+            {pendientesEnvio > 0 && onIrAGestoria && <button onClick={onIrAGestoria} className="text-[11px] font-bold text-amber-700 hover:underline cursor-pointer flex items-center gap-1">Generar el XML en Trimestre e impuestos <ArrowRight size={11} /></button>}
+          </div>
         </div>
       </div>
 
@@ -338,6 +351,7 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
           <div><p className="font-bold">{verificacion.ok ? 'La cadena de huellas es correcta: cada factura enlaza con la anterior y ninguna se ha modificado.' : 'Se han detectado incidencias en la cadena:'}</p>{verificacion.errores.map((e) => <p key={e}>· {e}</p>)}{algoritmoOk !== null && <p className="text-[11px] opacity-70 mt-1">Algoritmo de huella comprobado con los vectores oficiales de la AEAT: {algoritmoOk ? 'correcto' : 'ERROR'}.</p>}<button onClick={() => setVerificacion(null)} className="text-[11px] underline mt-1 cursor-pointer">Cerrar</button></div>
         </div>
       )}
+
 
       <div className="bg-white p-4 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row gap-3 items-center justify-between">
         <div className="relative w-full md:w-96"><Search className="absolute left-4 top-3 text-slate-400" size={18} /><input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} className="w-full pl-11 pr-4 py-2.5 border border-slate-200 rounded-2xl bg-slate-50/80 text-xs font-medium outline-none" placeholder="Buscar por número, cliente, NIF u obra…" /></div>
@@ -425,7 +439,8 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
                 <div><p className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">URL de cotejo del QR</p><a href={verVerifactu.verifactu.codigoQR} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline font-mono text-[10px] break-all">{verVerifactu.verifactu.codigoQR}</a></div>
                 <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-200 text-amber-900 space-y-2">
                   <p className="font-bold">Envío a la AEAT</p>
-                  <p className="text-[11px]">La remisión de los registros a la AEAT requiere firmar la petición con el certificado digital de la empresa en un servidor; no puede hacerse desde el navegador. Cuando lo envíes por otro medio (servidor propio o gestoría), márcalo aquí con el CSV que devuelve la AEAT.</p>
+                  <p className="text-[11px]">La app genera el fichero XML oficial del registro, que es lo que hay que remitir. El envío en sí requiere firmar la petición con el certificado digital de la empresa: no puede hacerse desde el navegador. Descarga el XML, remítelo por el medio que uses (gestoría o servidor propio) y márcalo aquí con el CSV que devuelva la AEAT.</p>
+                  <button onClick={() => descargarXmlFactura(verVerifactu)} className="px-3.5 py-2 bg-white border border-amber-300 hover:bg-amber-100 text-amber-900 rounded-xl font-bold text-[11px] flex items-center gap-1.5 cursor-pointer"><Download size={13} /> Descargar el XML de esta factura</button>
                   {verVerifactu.verifactu.estadoEnvio !== 'enviado' && (
                     <button onClick={() => { const csv = prompt('CSV o referencia de la AEAT (opcional):') ?? ''; onUpdateInvoice(verVerifactu.id, { verifactu: { ...verVerifactu.verifactu, estadoEnvio: 'enviado', fechaEnvio: hoyISO(), csvAEAT: csv || undefined } }); setVerVerifactu(null); }} className="px-3 py-1.5 bg-white border border-amber-300 text-amber-900 rounded-lg text-xs font-bold cursor-pointer">Marcar como enviada</button>
                   )}

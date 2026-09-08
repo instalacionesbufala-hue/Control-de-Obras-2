@@ -950,7 +950,7 @@ function AppPrincipal() {
           {activeTab === 'ventas' && (
             <SalesView invoices={invoices} clients={clients} projects={projects} companySettings={companySettings} siguienteNumero={siguienteNumeroFactura()} siguienteNumeroRectificativa={siguienteNumeroRectificativa()}
               onCreateInvoice={handleCreateInvoice} onRegistrarCobro={handleRegistrarCobro} onQuitarCobro={handleQuitarCobro} onIrABanco={() => irA('bancos')} onUpdateInvoiceStatus={handleUpdateInvoiceStatus} onUpdateInvoice={handleUpdateInvoice}
-              showNewInvoiceModal={showNewInvoiceModal} setShowNewInvoiceModal={setShowNewInvoiceModal} preselectedProject={preselectedProjectForInvoice} onAviso={(t, tipo) => setAviso({ texto: t, tipo: tipo || 'info' })} />
+              onIrAGestoria={() => irA('gestoria')} showNewInvoiceModal={showNewInvoiceModal} setShowNewInvoiceModal={setShowNewInvoiceModal} preselectedProject={preselectedProjectForInvoice} onAviso={(t, tipo) => setAviso({ texto: t, tipo: tipo || 'info' })} />
           )}
           {activeTab === 'gastos' && (
             <ExpensesView expenses={expenses} projects={projects} suppliers={suppliers} companySettings={companySettings} catalogItems={catalogItems} hayDrive={!!firebaseUser} onActualizarPrecios={handleActualizarPrecios} onCreateExpense={handleCreateExpense} onCreateSupplier={handleCreateSupplier} onUpdateExpense={handleUpdateExpense} onDeleteExpense={handleDeleteExpense}
@@ -964,7 +964,7 @@ function AppPrincipal() {
             <ClientsView clients={clients} projects={projects} invoices={invoices} hayDrive={!!firebaseUser} onAviso={(x, tipo) => setAviso({ texto: x, tipo: tipo || 'info' })} onCreateClient={handleCreateClient} onUpdateClient={handleUpdateClient} onDeleteClient={handleDeleteClient} onSelectProject={handleSelectProject} />
           )}
           {activeTab === 'rentabilidad' && <RentabilityView projects={projects} expenses={expenses} invoices={invoices} onSelectProject={handleSelectProject} />}
-          {activeTab === 'gestoria' && <TaxClosingView invoices={invoices} expenses={expenses} companySettings={companySettings} bankTransactions={bankTransactions} onNavigate={irA} />}
+          {activeTab === 'gestoria' && <TaxClosingView invoices={invoices} expenses={expenses} companySettings={companySettings} bankTransactions={bankTransactions} onNavigate={irA} onUpdateInvoice={handleUpdateInvoice} onAviso={(t, tipo) => setAviso({ texto: t, tipo: tipo || 'info' })} />}
           {activeTab === 'ajustes' && (
             <SettingsView companySettings={companySettings} onSaveSettings={setCompanySettings} onDeleteExamples={() => setShowDeleteDemoModal(true)} onCargarEjemplos={handleCargarEjemplos} hayDemo={hayDemo}
               estadoCompleto={estadoCompleto} onRestaurarEstado={handleRestaurarEstado} firebaseUser={firebaseUser} estadoNube={estadoNube} errorNube={errorNube} onAviso={(t, tipo) => setAviso({ texto: t, tipo: tipo || 'info' })} />
