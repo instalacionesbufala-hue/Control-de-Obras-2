@@ -30,7 +30,10 @@ export const ClientsView: React.FC<Props> = ({ clients, projects, invoices, onCr
   const [modo, setModo] = useState<'tarjetas' | 'lista'>(() => (localStorage.getItem('obracontrol-clientes-modo') as any) || 'tarjetas');
   const [tipoFiltro, setTipoFiltro] = useState<'todos' | TipoCliente>('todos');
   const [seleccionado, setSeleccionado] = useState<Client | null>(null);
-  const [pestana, setPestana] = useState<'info' | 'fotos' | 'docs' | 'facturas'>('info');
+  const [pestana, setPestana] = useState<'info' | 'obras' | 'fotos' | 'docs' | 'facturas'>('info');
+  // Un cliente puede tener varias obras y cada una sus propias fotos y documentos.
+  // Aquí se elige cuál se está mirando; 'todas' agrupa por obra.
+  const [obraSel, setObraSel] = useState<string>('todas');
   const [editando, setEditando] = useState<Client | null>(null);
   const [creando, setCreando] = useState(false);
   const [form, setForm] = useState(formVacio);
@@ -45,6 +48,12 @@ export const ClientsView: React.FC<Props> = ({ clients, projects, invoices, onCr
   };
 
   const cliente = seleccionado ? clients.find((c) => c.id === seleccionado.id) || seleccionado : null;
+
+  const abrirFicha = (c: Client) => {
+    setSeleccionado(c);
+    setPestana('info');
+    setObraSel('todas');
+  };
 
   const filtrados = clients.filter((c) => {
     if (tipoFiltro !== 'todos' && (c.tipoCliente || 'particular') !== tipoFiltro) return false;
@@ -166,7 +175,7 @@ export const ClientsView: React.FC<Props> = ({ clients, projects, invoices, onCr
                     {telefonoWhatsApp(c.telefono) && <a href={`https://wa.me/${telefonoWhatsApp(c.telefono)}`} target="_blank" rel="noreferrer" title="WhatsApp" className="p-1.5 hover:bg-emerald-100 rounded-lg text-emerald-600"><Phone size={14} /></a>}
                     <span className="text-[11px] font-bold text-slate-400 ml-1">{(c.documentos || []).length} docs · {(c.fotos || []).length} fotos</span>
                   </div>
-                  <button onClick={() => { setSeleccionado(c); setPestana('info'); }} className="font-bold text-blue-600 hover:text-blue-800 flex items-center gap-0.5 cursor-pointer">Abrir ficha <ChevronRight size={14} /></button>
+                  <button onClick={() => abrirFicha(c)} className="font-bold text-blue-600 hover:text-blue-800 flex items-center gap-0.5 cursor-pointer">Abrir ficha <ChevronRight size={14} /></button>
                 </div>
               </div>
             );
@@ -182,7 +191,7 @@ export const ClientsView: React.FC<Props> = ({ clients, projects, invoices, onCr
                   const obras = projects.filter((p) => p.clienteId === c.id).length;
                   const facturado = invoices.filter((i) => i.clienteId === c.id && !['Anulada', 'Rectificada'].includes(i.estado)).reduce((a, b) => a + b.total, 0);
                   return (
-                    <tr key={c.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => { setSeleccionado(c); setPestana('info'); }}>
+                    <tr key={c.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => abrirFicha(c)}>
                       <td className="p-3 font-bold text-slate-900">{c.nombre}</td>
                       <td className="p-3 font-mono text-slate-600">{c.nif || '—'}</td>
                       <td className="p-3 text-slate-600">{tipoLabel(c.tipoCliente)}</td>
@@ -220,7 +229,7 @@ export const ClientsView: React.FC<Props> = ({ clients, projects, invoices, onCr
               </div>
             </div>
             <div className="px-6 bg-slate-100/80 border-b border-slate-200 flex gap-2 pt-2 overflow-x-auto">
-              {([['info', 'Resumen y obras', HardHat], ['fotos', `Fotos (${(cliente.fotos || []).length})`, ImageIcon], ['docs', `Documentos (${(cliente.documentos || []).length})`, FolderOpen], ['facturas', `Facturas (${invoices.filter((i) => i.clienteId === cliente.id).length})`, BadgeEuro]] as const).map(([id, label, Icon]) => (
+              {([['info', 'Resumen', Users], ['obras', `Obras (${projects.filter((p) => p.clienteId === cliente.id).length})`, HardHat], ['fotos', `Fotos del cliente (${(cliente.fotos || []).length})`, ImageIcon], ['docs', `Documentos del cliente (${(cliente.documentos || []).length})`, FolderOpen], ['facturas', `Facturas (${invoices.filter((i) => i.clienteId === cliente.id).length})`, BadgeEuro]] as const).map(([id, label, Icon]) => (
                 <button key={id} onClick={() => setPestana(id)} className={`px-4 py-2.5 font-bold text-xs rounded-t-xl flex items-center gap-2 cursor-pointer whitespace-nowrap ${pestana === id ? 'bg-white text-blue-600 border-t-2 border-blue-600' : 'text-slate-600 hover:text-slate-900'}`}><Icon size={14} /> {label}</button>
               ))}
             </div>
@@ -231,49 +240,6 @@ export const ClientsView: React.FC<Props> = ({ clients, projects, invoices, onCr
                     <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-1.5"><p className="font-black text-slate-900 uppercase text-[11px]">Contacto</p><p className="flex items-center gap-2"><Phone size={13} className="text-slate-400" /> {cliente.telefono || '—'}</p><p className="flex items-center gap-2"><Mail size={13} className="text-slate-400" /> {cliente.email || '—'}</p><p className="flex items-center gap-2"><MapPin size={13} className="text-slate-400" /> {[cliente.direccion, cliente.codigoPostal, cliente.ciudad].filter(Boolean).join(', ') || '—'}</p>{cliente.notas && <p className="text-slate-500 pt-1 border-t border-slate-200 italic">{cliente.notas}</p>}</div>
                     <div className="p-4 bg-blue-50/60 rounded-2xl border border-blue-200 space-y-1.5"><p className="font-black text-blue-900 uppercase text-[11px]">Aceptación de presupuestos</p><p className="text-blue-800">{cliente.exigirFirma === false ? 'No se exige firma manuscrita: acepta indicando nombre y CIF (validación por pedido).' : 'Se exige firma en pantalla además de nombre y DNI.'}</p><button onClick={() => onUpdateClient(cliente.id, { exigirFirma: !(cliente.exigirFirma !== false) })} className="mt-1 px-3 py-1.5 bg-white border border-blue-200 text-blue-700 rounded-lg text-xs font-bold cursor-pointer">Cambiar a {cliente.exigirFirma === false ? 'exigir firma' : 'sin firma'}</button></div>
                   </div>
-                  {(() => {
-                    // Todo el material gráfico y documental de las obras de este cliente,
-                    // reunido aquí para enseñárselo o para preparar el CIE sin ir obra por obra.
-                    const obrasCli = projects.filter((p) => p.clienteId === cliente.id);
-                    const medios = obrasCli.flatMap((p) => (p.fotos || []).map((ft) => ({ ...ft, obra: p.obraCodigo || p.codigo })));
-                    const docs = obrasCli.flatMap((p) => (p.documentos || []).map((d) => ({ ...d, obra: p.obraCodigo || p.codigo })));
-                    const docsCie = docs.filter((d) => d.paraCie || d.tipo === 'CIE' || d.tipo === 'Memoria' || d.tipo === 'Planos');
-                    if (!medios.length && !docs.length) return null;
-                    return (
-                      <div className="space-y-3">
-                        {medios.length > 0 && (
-                          <div className="space-y-2">
-                            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><ImageIcon size={16} className="text-blue-600" /> Fotos y vídeos de campo <span className="text-[11px] font-normal text-slate-400">({medios.length})</span></h3>
-                            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                              {medios.slice(0, 12).map((m) => (
-                                <a key={m.id} href={m.driveEnlace || m.url} target="_blank" rel="noreferrer" className="group relative rounded-xl overflow-hidden border border-slate-200 aspect-square bg-slate-100 block" title={`${m.titulo} · ${m.obra}`}>
-                                  {m.url ? <img src={m.url} alt={m.titulo} className="w-full h-full object-cover" /> : <span className="w-full h-full flex items-center justify-center text-slate-400"><FileText size={20} /></span>}
-                                  {m.esVideo && <span className="absolute inset-0 flex items-center justify-center bg-slate-900/40 text-white"><Video size={20} /></span>}
-                                  <span className="absolute bottom-0 inset-x-0 bg-slate-900/70 text-white text-[9px] px-1 py-0.5 truncate">{m.obra}</span>
-                                </a>
-                              ))}
-                            </div>
-                            {medios.length > 12 && <p className="text-[10px] text-slate-400">y {medios.length - 12} más en la ficha de cada obra</p>}
-                          </div>
-                        )}
-                        {docs.length > 0 && (
-                          <div className="space-y-2">
-                            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><FileText size={16} className="text-indigo-600" /> Documentos de las obras <span className="text-[11px] font-normal text-slate-400">({docs.length})</span></h3>
-                            {docsCie.length > 0 && <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">{docsCie.length} documento{docsCie.length > 1 ? 's' : ''} de los necesarios para el certificado de instalación eléctrica (CIE).</p>}
-                            <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden">
-                              {docs.slice(0, 10).map((d) => (
-                                <div key={d.id} className="p-2.5 flex items-center gap-2 text-xs hover:bg-slate-50">
-                                  <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded shrink-0 ${d.paraCie || d.tipo === 'CIE' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>{d.tipo}</span>
-                                  <span className="flex-1 min-w-0"><span className="font-bold text-slate-800 block truncate">{d.nombre}</span><span className="text-[10px] text-slate-400">{d.obra} · {d.fecha}</span></span>
-                                  {(d.driveEnlace || d.dataUrl) && <a href={d.driveEnlace || d.dataUrl} target="_blank" rel="noreferrer" download={d.driveEnlace ? undefined : d.nombre} className="px-2 py-1 bg-blue-50 text-blue-700 rounded-lg font-bold shrink-0">Abrir</a>}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
 
                   <div className="space-y-2">
                     <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><HardHat size={16} className="text-blue-600" /> Presupuestos y obras</h3>
@@ -288,6 +254,77 @@ export const ClientsView: React.FC<Props> = ({ clients, projects, invoices, onCr
                   </div>
                 </>
               )}
+              {pestana === 'obras' && (() => {
+                // Cada obra con lo suyo: sus fotos, sus vídeos y sus documentos. Un cliente puede
+                // tener varias y mezclarlo todo hace imposible encontrar nada.
+                const obrasCli = projects.filter((p) => p.clienteId === cliente.id).sort((a, b) => b.fechaInicio.localeCompare(a.fechaInicio));
+                const visibles = obraSel === 'todas' ? obrasCli : obrasCli.filter((p) => p.id === obraSel);
+                if (obrasCli.length === 0) return <div className="p-10 border-2 border-dashed border-slate-200 rounded-3xl text-center text-xs text-slate-400">Este cliente todavía no tiene presupuestos ni obras.</div>;
+                return (
+                  <div className="space-y-4">
+                    <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+                      <button onClick={() => setObraSel('todas')} className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer shrink-0 ${obraSel === 'todas' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Todas ({obrasCli.length})</button>
+                      {obrasCli.map((p) => {
+                        const n = (p.fotos || []).length + (p.documentos || []).length;
+                        return (
+                          <button key={p.id} onClick={() => setObraSel(p.id)} className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer shrink-0 flex items-center gap-1.5 ${obraSel === p.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`} title={p.nombre}>
+                            <span className="font-mono">{p.obraCodigo || p.codigo}</span>
+                            <span className="max-w-[9rem] truncate font-normal opacity-80">{p.nombre}</span>
+                            {n > 0 && <span className={`text-[10px] px-1.5 rounded-full ${obraSel === p.id ? 'bg-white/25' : 'bg-white'}`}>{n}</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {visibles.map((p) => {
+                      const fotos = p.fotos || [];
+                      const docs = p.documentos || [];
+                      const cie = docs.filter((d) => d.paraCie || d.tipo === 'CIE' || d.tipo === 'Memoria' || d.tipo === 'Planos');
+                      return (
+                        <div key={p.id} className="border border-slate-200 rounded-2xl overflow-hidden">
+                          <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2 flex-wrap">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-[10px] font-black font-mono bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">{p.obraCodigo || p.codigo}</span>
+                                <span className="text-[10px] font-black uppercase bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">{p.estado}</span>
+                              </div>
+                              <p className="font-bold text-slate-900 text-xs mt-1 truncate">{p.nombre}</p>
+                              <p className="text-[10px] text-slate-500">{formatCurrency(p.presupuestoAceptado)} · {fotos.length} foto{fotos.length === 1 ? '' : 's'} · {docs.length} documento{docs.length === 1 ? '' : 's'}</p>
+                            </div>
+                            <button onClick={() => { setSeleccionado(null); onSelectProject(p.id); }} className="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg font-bold text-xs cursor-pointer shrink-0 flex items-center gap-1">Abrir obra <ChevronRight size={13} /></button>
+                          </div>
+                          <div className="p-3.5 space-y-3">
+                            {fotos.length === 0 && docs.length === 0 && <p className="text-xs text-slate-400 text-center py-3">Sin fotos ni documentos todavía. Se suben desde la ficha de la obra.</p>}
+                            {fotos.length > 0 && (
+                              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                                {fotos.map((m) => (
+                                  <a key={m.id} href={m.driveEnlace || m.url} target="_blank" rel="noreferrer" className="group relative rounded-xl overflow-hidden border border-slate-200 aspect-square bg-slate-100 block" title={m.titulo}>
+                                    {m.url ? <img src={m.url} alt={m.titulo} className="w-full h-full object-cover" /> : <span className="w-full h-full flex items-center justify-center text-slate-400"><ImageIcon size={18} /></span>}
+                                    {m.esVideo && <span className="absolute inset-0 flex items-center justify-center bg-slate-900/40 text-white"><Video size={18} /></span>}
+                                  </a>
+                                ))}
+                              </div>
+                            )}
+                            {docs.length > 0 && (
+                              <div className="space-y-1.5">
+                                {cie.length > 0 && <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">{cie.length} de estos documentos sirven para el certificado de instalación eléctrica (CIE).</p>}
+                                {docs.map((d) => (
+                                  <div key={d.id} className="flex items-center gap-2 text-xs p-2 rounded-xl bg-slate-50 border border-slate-200">
+                                    <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded shrink-0 ${d.paraCie || d.tipo === 'CIE' ? 'bg-emerald-100 text-emerald-800' : 'bg-white text-slate-600 border border-slate-200'}`}>{d.tipo}</span>
+                                    <span className="flex-1 min-w-0"><span className="font-bold text-slate-800 block truncate">{d.nombre}</span><span className="text-[10px] text-slate-400">{d.fecha} · {d.tamano}</span></span>
+                                    {(d.driveEnlace || d.dataUrl) && <a href={d.driveEnlace || d.dataUrl} target="_blank" rel="noreferrer" download={d.driveEnlace ? undefined : d.nombre} className="px-2 py-1 bg-blue-50 text-blue-700 rounded-lg font-bold shrink-0">Abrir</a>}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
               {pestana === 'fotos' && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between"><h3 className="font-bold text-slate-800 text-sm">Fotos del cliente</h3><button onClick={() => photoInputRef.current?.click()} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"><Upload size={14} /> Subir foto</button></div>

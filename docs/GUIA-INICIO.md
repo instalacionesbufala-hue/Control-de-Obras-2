@@ -107,7 +107,7 @@ Esto importa más de lo que parece. Antes las fotos se guardaban dentro de los d
 - El permiso que se pide es `drive.file`, que deja ver a la app **solo los archivos que ella crea**, nunca el resto de tu Drive. Es un permiso no sensible, así que no exige la verificación de Google.
 - Sin Drive vinculado todo sigue funcionando, pero con el tope de 400 KB por archivo y gastando del limitado espacio de la nube.
 
-En la **ficha del cliente** se reúnen las fotos y vídeos de todas sus obras y la lista de documentos, marcando los que sirven para el certificado de instalación eléctrica (CIE).
+En la **ficha del cliente**, la pestaña **Obras** enseña cada obra por separado. Arriba hay una fila de pestañas con el código y el nombre de cada una, y un contador de cuántas fotos y documentos tiene. Al elegir una, ves solo lo suyo: sus fotos y vídeos, sus documentos y un botón para abrir la obra completa. Con "Todas" las ves seguidas, cada una en su bloque. Los documentos que sirven para el certificado de instalación eléctrica (CIE) se marcan en verde y se cuentan aparte.
 
 ## Copia local: no dependas solo de Google
 
