@@ -1,0 +1,15 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "control-de-obra-react",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--port=3055",
+        "--strictPort"
+      ],
+      "port": 3055
+    }
+  ]
+}
