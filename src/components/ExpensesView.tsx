@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import { Receipt, Plus, Search, HardHat, Building2, CheckCircle2, X, Eye, RefreshCw, Edit3, Trash2, Paperclip, Download, AlertCircle, Info, Sparkles, Boxes } from 'lucide-react';
 import { extraerDatosTicket, comprimirImagen, DatosTicket } from '../lib/gemini';
 import { proponerPreciosDesdeFactura, CoincidenciaPrecio } from '../lib/catalogo';
+import { subirADrive, comprimirFoto, tamanoLegible } from '../lib/drive';
 import { Expense, Project, Supplier, CompanySettings, ExpenseCategoria, CatalogItem } from '../types';
 import { formatCurrency, formatDate, uid, redondear2 } from '../utils/formatters';
 import { PeriodFilter } from './PeriodFilter';
@@ -13,6 +14,7 @@ interface Props {
   suppliers?: Supplier[];
   companySettings: CompanySettings;
   catalogItems?: CatalogItem[];
+  hayDrive?: boolean; // cuenta de Google vinculada: los justificantes van a su Drive
   onActualizarPrecios?: (cambios: Array<{ id: string; precioCompra: number; origen: string }>) => void;
   onCreateExpense: (expense: Expense) => void;
   onCreateSupplier?: (supplier: Supplier) => void;
@@ -27,10 +29,10 @@ const CATEGORIAS: ExpenseCategoria[] = ['Materiales', 'Subcontratas', 'Alquiler 
 const METODOS = ['Tarjeta', 'Transferencia Bancaria', 'Domiciliación', 'Efectivo', 'Bizum'];
 const LIMITE_ADJUNTO = 400 * 1024;
 
-type Form = { proveedor: string; cifProveedor: string; numeroFactura: string; concepto: string; tipo: 'SL' | 'Obra'; categoria: ExpenseCategoria; obraId: string; baseImponible: number; ivaPorcentaje: number; irpfRetencion: number; fecha: string; metodoPago: string; estadoPago: 'Pagado' | 'Pendiente'; esRecurrente: boolean; adjuntoNombre?: string; adjuntoDataUrl?: string };
+type Form = { proveedor: string; cifProveedor: string; numeroFactura: string; concepto: string; tipo: 'SL' | 'Obra'; categoria: ExpenseCategoria; obraId: string; baseImponible: number; ivaPorcentaje: number; irpfRetencion: number; fecha: string; metodoPago: string; estadoPago: 'Pagado' | 'Pendiente'; esRecurrente: boolean; adjuntoNombre?: string; adjuntoDataUrl?: string; adjuntoDriveId?: string; adjuntoDriveEnlace?: string };
 const formVacio = (p?: Project | null): Form => ({ proveedor: '', cifProveedor: '', numeroFactura: '', concepto: '', tipo: p ? 'Obra' : 'SL', categoria: 'Materiales', obraId: p?.id || '', baseImponible: 0, ivaPorcentaje: 21, irpfRetencion: 0, fecha: hoyISO(), metodoPago: 'Tarjeta', estadoPago: 'Pagado', esRecurrente: false });
 
-export const ExpensesView: React.FC<Props> = ({ expenses, projects, suppliers = [], companySettings, catalogItems = [], onActualizarPrecios, onCreateExpense, onCreateSupplier, onUpdateExpense, onDeleteExpense, showNewExpenseModal, setShowNewExpenseModal, preselectedProject }) => {
+export const ExpensesView: React.FC<Props> = ({ expenses, projects, suppliers = [], companySettings, catalogItems = [], hayDrive = false, onActualizarPrecios, onCreateExpense, onCreateSupplier, onUpdateExpense, onDeleteExpense, showNewExpenseModal, setShowNewExpenseModal, preselectedProject }) => {
   const [periodo, setPeriodo] = useState<PeriodoFiltro>(periodoActual());
   const [tab, setTab] = useState<'todos' | 'SL' | 'Obra' | 'recurrentes'>('todos');
   const [busqueda, setBusqueda] = useState('');
@@ -97,10 +99,18 @@ export const ExpensesView: React.FC<Props> = ({ expenses, projects, suppliers = 
       } else {
         dataUrl = await leer(f);
       }
+      // La IA lee el archivo desde aquí, en memoria: no hace falta guardarlo en el estado
       setArchivoIA(dataUrl.length < 6_000_000 ? dataUrl : null);
-      if (dataUrl.length > LIMITE_ADJUNTO * 1.37) {
+
+      if (hayDrive) {
+        // El justificante va a tu Drive, carpeta «Gastos AAAA». En el gasto queda el enlace.
+        const subido = await subirADrive(f.type.startsWith('image/') ? await comprimirFoto(f) : f, f.name, 'Gastos', String(new Date(form.fecha || hoyISO()).getFullYear()));
+        setForm((x) => ({ ...x, adjuntoNombre: f.name, adjuntoDataUrl: undefined, adjuntoDriveId: subido.id, adjuntoDriveEnlace: subido.enlace }));
+        setError(null);
+        setAvisoIA({ texto: `Justificante guardado en tu Drive (${tamanoLegible(subido.tamano)}), carpeta «Gastos ${new Date(form.fecha || hoyISO()).getFullYear()}».`, tipo: 'ok' });
+      } else if (dataUrl.length > LIMITE_ADJUNTO * 1.37) {
         setForm((x) => ({ ...x, adjuntoNombre: f.name, adjuntoDataUrl: undefined }));
-        setError(`El archivo supera ${LIMITE_ADJUNTO / 1024} KB: se guarda solo el nombre. Guarda el original en tu Drive.${hayIA ? ' La IA sí puede leerlo.' : ''}`);
+        setError(`El archivo supera ${LIMITE_ADJUNTO / 1024} KB: se guarda solo el nombre. Vincula Google Drive para subirlo entero.${hayIA ? ' La IA sí puede leerlo.' : ''}`);
       } else {
         setForm((x) => ({ ...x, adjuntoNombre: f.name, adjuntoDataUrl: dataUrl }));
       }
@@ -181,6 +191,8 @@ export const ExpensesView: React.FC<Props> = ({ expenses, projects, suppliers = 
       metodoPago: f.metodoPago,
       adjuntoNombre: f.adjuntoNombre,
       adjuntoDataUrl: f.adjuntoDataUrl,
+      adjuntoDriveId: f.adjuntoDriveId,
+      adjuntoDriveEnlace: f.adjuntoDriveEnlace,
       bancoConciliado: false,
       esRecurrente: f.esRecurrente,
     };
@@ -294,7 +306,7 @@ export const ExpensesView: React.FC<Props> = ({ expenses, projects, suppliers = 
               <div className="flex items-center justify-between text-[11px] text-slate-500"><span>{verDetalle.metodoPago} · {verDetalle.estadoPago}{verDetalle.bancoConciliado ? ' · conciliado con el banco' : ''}</span>{verDetalle.adjuntoNombre && <span className="flex items-center gap-1"><Paperclip size={12} /> {verDetalle.adjuntoNombre}</span>}</div>
               {verDetalle.adjuntoDataUrl && verDetalle.adjuntoDataUrl.startsWith('data:image') && <img src={verDetalle.adjuntoDataUrl} alt="Justificante" className="max-h-64 rounded-xl border border-slate-200 mx-auto" />}
             </div>
-            <div className="flex gap-2">{verDetalle.adjuntoDataUrl && <button onClick={() => descargarAdjunto(verDetalle)} className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer"><Download size={14} /> Descargar justificante</button>}<button onClick={() => { abrirEditar(verDetalle); setVerDetalle(null); }} className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs cursor-pointer">Editar</button><button onClick={() => setVerDetalle(null)} className="ml-auto px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl font-bold text-xs cursor-pointer">Cerrar</button></div>
+            <div className="flex gap-2">{verDetalle.adjuntoDriveEnlace && <a href={verDetalle.adjuntoDriveEnlace} target="_blank" rel="noreferrer" className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer"><Download size={14} /> Ver justificante en Drive</a>}{!verDetalle.adjuntoDriveEnlace && verDetalle.adjuntoDataUrl && <button onClick={() => descargarAdjunto(verDetalle)} className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer"><Download size={14} /> Descargar justificante</button>}<button onClick={() => { abrirEditar(verDetalle); setVerDetalle(null); }} className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs cursor-pointer">Editar</button><button onClick={() => setVerDetalle(null)} className="ml-auto px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl font-bold text-xs cursor-pointer">Cerrar</button></div>
           </div>
         </div>
       )}

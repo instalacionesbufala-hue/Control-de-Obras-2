@@ -356,6 +356,7 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
             <p className="font-bold text-emerald-700 flex items-center gap-1.5"><CheckCircle2 size={15} className="text-emerald-600" /> {isInvoice ? `Presupuesto ${project?.codigo || invoice?.obraCodigo || ''} aceptado por el cliente` : 'Presupuesto aceptado'}</p>
             <p className={isDark ? 'text-slate-300' : 'text-slate-700'}>Aceptado por <strong>{firma.firmadoPor}</strong> · NIF {firma.dni}</p>
             <p className="font-mono text-slate-500 text-[11px]">Fecha y hora: {formatDate(firma.fechaFirma)}{firma.metodo === 'portal' ? ' · desde el dispositivo del cliente' : ''}</p>
+            {firma.informadoProteccionDatos && <p className="text-slate-400 text-[10px]">El cliente confirmó haber leído la información sobre protección de datos.</p>}
             {firma.codigoAceptacion && <p className="font-mono text-slate-400 text-[10px] break-all">Código de aceptación: {firma.codigoAceptacion.substring(0, 40)}{firma.codigoAceptacion.length > 40 ? '…' : ''}</p>}
           </div>
           {firma.trazoFirma && (

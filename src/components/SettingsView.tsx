@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Settings, ShieldCheck, Building2, CheckCircle2, Save, Image, LayoutTemplate, Upload, Trash2, Plus, RefreshCw, AlertTriangle, Cloud, Link as LinkIcon, X, UserCheck, HardHat, Download, Database, Hash, FileText, CalendarDays, Info, Bell, Mail, Sparkles, Eye, EyeOff, Copy, Check } from 'lucide-react';
+import { Settings, ShieldCheck, Building2, CheckCircle2, Save, Image, LayoutTemplate, Upload, Trash2, Plus, RefreshCw, AlertTriangle, Cloud, Link as LinkIcon, X, UserCheck, HardHat, Download, Database, Hash, FileText, CalendarDays, Info, Bell, Mail, Sparkles, Eye, EyeOff, Copy, Check, Lock } from 'lucide-react';
 import { probarClaveGemini, ModeloGemini } from '../lib/gemini';
 import { SCRIPT_AVISO_ACEPTACION, PASOS_SCRIPT } from '../data/appsScript';
 import { CompanySettings, AppState, DisponibilidadTecnico } from '../types';
@@ -9,6 +9,7 @@ import { exportarCopia, importarCopia, leerCopiaAnterior, tamanoEstadoKB, anotar
 import { firebaseDisponible, configPendiente, claveMalCopiada, proyectoFirebase } from '../lib/firebase';
 import { pedirPermisoGoogle, tieneToken, SCOPE_CALENDAR, SCOPE_GMAIL } from '../lib/googleToken';
 import { TemplatesSettings } from './TemplatesSettings';
+import { textoPrivacidad, ETIQUETA_CASILLA, ANIOS_CONSERVACION } from '../data/privacidad';
 import { numeroDocumento } from '../utils/formatters';
 import { fechaHoraES } from '../utils/dates';
 
@@ -230,6 +231,8 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
   };
 
   const plantillas = f.plantillasPersonalizadas || DEFAULT_TEMPLATES;
+
+  const priv = textoPrivacidad(f);
 
   const kb = tamanoEstadoKB(estadoCompleto);
   const kbNube = tamanoDocumentoKB(estadoCompleto);
@@ -517,6 +520,32 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
             <Campo label="Caducidad" value={f.verifactuCertificado.caducidad} onChange={(v) => set('verifactuCertificado', { ...f.verifactuCertificado, caducidad: v })} placeholder="DD/MM/AAAA" />
             <div><label className="block font-bold text-slate-700 mb-1">Huella del archivo (solo para identificarlo)</label><div className="flex gap-2"><input value={f.verifactuCertificado.huellaSHA256} readOnly className="flex-1 border border-slate-200 rounded-xl px-3 py-2 font-mono text-[10px] bg-slate-50" /><input type="file" ref={certRef} accept=".p12,.pfx,.cer,.crt,.pem" className="hidden" onChange={subirCert} /><button type="button" onClick={() => certRef.current?.click()} className="px-3 py-2 bg-slate-100 rounded-xl font-bold cursor-pointer" title="Calcula la huella del archivo sin guardarlo"><FileText size={14} /></button></div>{f.verifactuCertificado.archivoNombre && <p className="text-[10px] text-slate-400 mt-1">Archivo: {f.verifactuCertificado.archivoNombre} (no se ha guardado)</p>}</div>
           </div>
+        </Seccion>
+
+        {/* 8b. PROTECCIÓN DE DATOS */}
+        <Seccion icono={<Lock size={22} />} color="indigo" titulo="Protección de datos (RGPD)" sub="Este es el texto exacto que ve el cliente antes de aceptar y firmar un presupuesto. Se genera con tus datos de empresa.">
+          <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-2xl text-xs text-blue-900 flex items-start gap-2">
+            <Info size={15} className="shrink-0 mt-0.5" />
+            <span>No se pide <b>consentimiento</b>, se <b>informa</b>. La base legal es ejecutar el contrato (art. 6.1.b) y cumplir la obligación de facturar (art. 6.1.c): si pidieras consentimiento, el cliente podría retirarlo y te quedarías sin poder facturar. Por eso la casilla dice «{ETIQUETA_CASILLA}», que es la prueba de que le informaste, y queda guardada con la aceptación.</span>
+          </div>
+          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+            <p className="text-[11px] font-bold text-slate-700 uppercase tracking-wide">Resumen que se ve en pantalla</p>
+            <p className="text-xs text-slate-600">{priv.resumen}</p>
+          </div>
+          <div className="p-4 bg-white rounded-2xl border border-slate-200 space-y-2">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <p className="text-[11px] font-bold text-slate-700 uppercase tracking-wide">Información completa (se despliega al pulsar «Leer la información completa»)</p>
+              <button type="button" onClick={() => { navigator.clipboard?.writeText(priv.detalle.replace(/\*\*/g, '')); onAviso?.('Texto copiado. Puedes pegarlo en tu web o en un anexo en papel.', 'ok'); }} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold text-[11px] flex items-center gap-1.5 cursor-pointer"><Copy size={13} /> Copiar texto</button>
+            </div>
+            <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+              {priv.detalle.split('\n').map((l, i) => l.trim() === '' ? <div key={i} className="h-1" /> : (
+                <p key={i} className="text-[11px] text-slate-600 leading-relaxed">
+                  {l.split('**').map((trozo, j) => j % 2 ? <b key={j} className="text-slate-900">{trozo}</b> : <span key={j}>{trozo}</span>)}
+                </p>
+              ))}
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-500">Los datos que aparecen (razón social, NIF, domicilio y correo) salen del apartado «Entidad y datos fiscales». Si los cambias, el texto se actualiza solo. Conservación fijada en {ANIOS_CONSERVACION} años (Código de Comercio); los datos de una factura emitida no se pueden borrar antes de ese plazo. Si algún día tratas datos de más de un puñado de clientes con empleados a tu cargo, revisa con tu gestoría el registro de actividades de tratamiento: es un documento interno de una página, no hay que presentarlo en ningún sitio.</p>
         </Seccion>
 
         {/* 9. EJEMPLOS */}

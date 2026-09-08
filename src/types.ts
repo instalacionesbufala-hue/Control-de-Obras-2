@@ -149,6 +149,8 @@ export interface FirmaCliente {
   fechaFirma: string; // ISO con hora
   trazoFirma?: string; // PNG en data URL (opcional si el cliente no exige firma)
   codigoAceptacion?: string;
+  // Prueba de que se le mostró la información de protección de datos al firmar
+  informadoProteccionDatos?: boolean;
   metodo?: 'portal' | 'presencial' | 'codigo';
 }
 
@@ -388,7 +390,9 @@ export interface Expense {
   estadoPago: 'Pagado' | 'Pendiente';
   metodoPago: string;
   adjuntoNombre?: string;
-  adjuntoDataUrl?: string;
+  adjuntoDataUrl?: string; // solo si no hay Drive
+  adjuntoDriveId?: string;
+  adjuntoDriveEnlace?: string;
   ocrDetectado?: boolean;
   bancoConciliado?: boolean;
   transaccionId?: string;

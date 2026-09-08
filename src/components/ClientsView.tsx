@@ -3,6 +3,7 @@ import { Users, Plus, Search, HardHat, FolderOpen, Image as ImageIcon, Phone, Ma
 import { Client, Project, Invoice, ProjectPhoto, ProjectDocument, TipoCliente } from '../types';
 import { formatCurrency, uid, telefonoWhatsApp } from '../utils/formatters';
 import { hoyISO } from '../utils/dates';
+import { prepararMedia, subirADrive, tamanoLegible } from '../lib/drive';
 
 interface Props {
   clients: Client[];
@@ -12,6 +13,8 @@ interface Props {
   onUpdateClient: (clientId: string, campos: Partial<Client>) => void;
   onDeleteClient: (clientId: string) => void;
   onSelectProject: (projectId: string) => void;
+  hayDrive?: boolean; // cuenta de Google vinculada: los archivos van a su Drive
+  onAviso?: (texto: string, tipo?: 'ok' | 'error' | 'info') => void;
 }
 
 const TIPOS: Array<{ id: TipoCliente; label: string }> = [
@@ -25,7 +28,7 @@ const LIMITE_ADJUNTO = 400 * 1024; // 400 KB por archivo incrustado
 
 const formVacio = { nombre: '', nif: '', email: '', telefono: '', direccion: '', ciudad: '', codigoPostal: '', notas: '', exigirFirma: true, tipoCliente: 'particular' as TipoCliente };
 
-export const ClientsView: React.FC<Props> = ({ clients, projects, invoices, onCreateClient, onUpdateClient, onDeleteClient, onSelectProject }) => {
+export const ClientsView: React.FC<Props> = ({ clients, projects, invoices, onCreateClient, onUpdateClient, onDeleteClient, onSelectProject, hayDrive = false, onAviso }) => {
   const [busqueda, setBusqueda] = useState('');
   const [modo, setModo] = useState<'tarjetas' | 'lista'>(() => (localStorage.getItem('obracontrol-clientes-modo') as any) || 'tarjetas');
   const [tipoFiltro, setTipoFiltro] = useState<'todos' | TipoCliente>('todos');
@@ -89,20 +92,42 @@ export const ClientsView: React.FC<Props> = ({ clients, projects, invoices, onCr
     r.readAsDataURL(file);
   });
 
+  // Los archivos del cliente van a su carpeta de Drive, igual que los de obra.
+  // Sin Drive se guardan dentro de la app y gastan del limitado espacio de la nube.
+  const carpetaCliente = (c: Client) => ({ codigo: 'Cliente', nombre: c.nombre });
+
   const subirFoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !cliente) return;
-    const dataUrl = await leerArchivo(file);
-    if (!dataUrl) return alert(`La foto supera ${LIMITE_ADJUNTO / 1024} KB. Reduce su tamaño antes de subirla (la app guarda las fotos dentro del propio estado).`);
-    const foto: ProjectPhoto = { id: uid('foto'), url: dataUrl, titulo: file.name.replace(/\.[^/.]+$/, ''), fecha: hoyISO(), tipo: 'despues' };
-    onUpdateClient(cliente.id, { fotos: [...(cliente.fotos || []), foto] });
     e.target.value = '';
+    if (!file || !cliente) return;
+    try {
+      const m = await prepararMedia(file, carpetaCliente(cliente), { hayDrive, limiteSinDrive: LIMITE_ADJUNTO });
+      const foto: ProjectPhoto = { id: uid('foto'), url: m.url, titulo: m.titulo, fecha: hoyISO(), tipo: 'despues', driveFileId: m.driveFileId, driveEnlace: m.driveEnlace, nombreArchivo: m.nombreArchivo, tamano: m.tamano, esVideo: m.esVideo };
+      onUpdateClient(cliente.id, { fotos: [...(cliente.fotos || []), foto] });
+      onAviso?.(`${m.esVideo ? 'Vídeo' : 'Foto'} de ${tamanoLegible(m.tamano)} añadido. ${m.aviso || ''}`, 'ok');
+    } catch (err: any) {
+      onAviso?.(err?.message || 'No se pudo guardar el archivo.', 'error');
+    }
   };
   const subirDoc = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file || !cliente) return;
+    const nombreL = file.name.toLowerCase();
+    const tipoDoc = (nombreL.includes('cie') ? 'CIE' : nombreL.includes('memoria') ? 'Memoria' : nombreL.includes('presu') ? 'Presupuesto' : 'Otro') as ProjectDocument['tipo'];
+    if (hayDrive) {
+      try {
+        const subido = await subirADrive(file, file.name, 'Cliente', cliente.nombre);
+        const doc: ProjectDocument = { id: uid('doc'), nombre: file.name, tipo: tipoDoc, fecha: hoyISO(), tamano: `${(file.size / 1024).toFixed(0)} KB`, estado: 'Aprobado', driveFileId: subido.id, driveEnlace: subido.enlace, tamanoBytes: subido.tamano, mime: file.type };
+        onUpdateClient(cliente.id, { documentos: [...(cliente.documentos || []), doc], documentosCount: (cliente.documentos?.length || 0) + 1 });
+        onAviso?.(`Documento subido a tu Drive (${tamanoLegible(subido.tamano)}), carpeta «Cliente ${cliente.nombre}».`, 'ok');
+      } catch (err: any) {
+        onAviso?.(err?.message || 'No se pudo subir el documento.', 'error');
+      }
+      return;
+    }
     const dataUrl = await leerArchivo(file);
-    const nombre = file.name.toLowerCase();
+    const nombre = nombreL;
     const doc: ProjectDocument = { id: uid('doc'), nombre: file.name, tipo: nombre.includes('cie') ? 'CIE' : nombre.includes('memoria') ? 'Memoria' : nombre.includes('presu') ? 'Presupuesto' : 'Otro', fecha: hoyISO(), tamano: `${(file.size / 1024).toFixed(0)} KB`, estado: 'Aprobado', dataUrl, notas: dataUrl ? undefined : 'Archivo grande: solo se guarda el nombre (guárdalo en tu Drive).' };
     onUpdateClient(cliente.id, { documentos: [...(cliente.documentos || []), doc], documentosCount: (cliente.documentos?.length || 0) + 1 });
     e.target.value = '';

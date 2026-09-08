@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { ETIQUETA_CASILLA } from '../data/privacidad';
 import { CheckCircle2, AlertCircle, ShieldCheck, FileText, Clock, CalendarDays, Copy, Check, Phone, Mail } from 'lucide-react';
 import { leerPropuesta, enviarAceptacion, PropuestaPublica } from '../lib/propuestas';
 import { generarCodigoAceptacion, sha256Hex, validarDniCif } from '../utils/acceptanceCrypto';
@@ -15,6 +16,8 @@ export const PublicAcceptancePage: React.FC<{ token: string }> = ({ token }) => 
   const [nombre, setNombre] = useState('');
   const [dni, setDni] = useState('');
   const [terminos, setTerminos] = useState(false);
+  const [privacidadLeida, setPrivacidadLeida] = useState(false);
+  const [verPrivacidad, setVerPrivacidad] = useState(false);
   const [firma, setFirma] = useState<string | null>(null);
   const [hueco, setHueco] = useState<HuecoPropuesto | null>(null);
   const [ningunHueco, setNingunHueco] = useState(false);
@@ -46,6 +49,7 @@ export const PublicAcceptancePage: React.FC<{ token: string }> = ({ token }) => 
     const v = validarDniCif(dni);
     if (!v.valido) return setErrorForm(v.mensaje || 'Indica un DNI/CIF válido.');
     if (!terminos) return setErrorForm('Marca la casilla de conformidad con el presupuesto.');
+    if (!privacidadLeida) return setErrorForm('Marca que has leído la información sobre protección de datos.');
     if (propuesta.exigirFirma && !firma) return setErrorForm('Falta la firma en el recuadro.');
     if (propuesta.huecos.length > 0 && !hueco && !ningunHueco) return setErrorForm('Elige un hueco para la instalación o marca que ninguno te viene bien.');
     setEnviando(true);
@@ -63,6 +67,7 @@ export const PublicAcceptancePage: React.FC<{ token: string }> = ({ token }) => 
         codigoAceptacion: cod,
         huecoElegido: hueco || undefined,
         notasCliente: [ningunHueco ? 'Ningún hueco propuesto me viene bien.' : '', notas.trim()].filter(Boolean).join(' ') || undefined,
+        informadoProteccionDatos: true,
         userAgent: navigator.userAgent.substring(0, 120),
       });
       setCodigo(cod);
@@ -200,8 +205,25 @@ export const PublicAcceptancePage: React.FC<{ token: string }> = ({ token }) => 
 
             <label className="flex items-start gap-3 cursor-pointer text-xs text-slate-700 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
               <input type="checkbox" checked={terminos} onChange={(e) => setTerminos(e.target.checked)} className="mt-0.5 w-4 h-4 rounded" />
-              <span>He leído y acepto el presupuesto <strong>{pr.codigo}</strong> por <strong>{formatCurrency(pr.total)}</strong> {pr.sinImpuestos ? '(sin impuestos)' : '(IVA incluido)'} y sus condiciones. Mis datos se usarán únicamente para ejecutar y facturar esta instalación.</span>
+              <span>He leído y acepto el presupuesto <strong>{pr.codigo}</strong> por <strong>{formatCurrency(pr.total)}</strong> {pr.sinImpuestos ? '(sin impuestos)' : '(IVA incluido)'} y sus condiciones.</span>
             </label>
+
+            {/* Información de protección de datos. La ley obliga a informar, no a pedir
+                consentimiento: la base legal es el contrato y la obligación de facturar. */}
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+              <label className="flex items-start gap-3 cursor-pointer text-slate-700">
+                <input type="checkbox" checked={privacidadLeida} onChange={(e) => setPrivacidadLeida(e.target.checked)} className="mt-0.5 w-4 h-4 rounded" />
+                <span>{ETIQUETA_CASILLA} <span className="text-slate-500">{pr.privacidad?.resumen}</span></span>
+              </label>
+              <button type="button" onClick={() => setVerPrivacidad(!verPrivacidad)} className="text-blue-600 font-bold hover:underline cursor-pointer flex items-center gap-1">
+                <ShieldCheck size={13} /> {verPrivacidad ? 'Ocultar la información completa' : 'Leer la información completa'}
+              </button>
+              {verPrivacidad && (
+                <div className="p-3 bg-white border border-slate-200 rounded-lg max-h-64 overflow-y-auto text-[11px] text-slate-600 leading-relaxed whitespace-pre-line">
+                  {(pr.privacidad?.detalle || '').replace(/\*\*/g, '')}
+                </div>
+              )}
+            </div>
 
             {errorForm && <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2"><AlertCircle size={16} /> {errorForm}</div>}
 

@@ -11,6 +11,7 @@ import { construirPropuesta, publicarPropuesta, generarToken, enlacePropuesta } 
 import { leerCodigoAceptacion } from '../utils/acceptanceCrypto';
 import { firebaseDisponible } from '../lib/firebase';
 import { CierreObraMovil } from './CierreObraMovil';
+import { prepararMedia, subirADrive, tamanoLegible } from '../lib/drive';
 import { ventaConMargen, costeDe } from '../lib/catalogo';
 
 interface Props {
@@ -366,19 +367,40 @@ export const ProjectsView: React.FC<Props> = (props) => {
   });
   const subirDoc = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (!f || !selected) return;
-    const dataUrl = await leer(f);
-    const n = f.name.toLowerCase();
-    onAddDocument(selected.id, { nombre: f.name, tipo: n.includes('cie') || n.includes('boletin') || n.includes('boletín') ? 'CIE' : n.includes('memoria') ? 'Memoria' : n.includes('plano') ? 'Planos' : 'Otro', fecha: hoyISO(), tamano: `${Math.round(f.size / 1024)} KB`, estado: 'Aprobado', dataUrl, notas: dataUrl ? undefined : 'Archivo grande: solo se guarda el nombre.' });
     e.target.value = '';
+    if (!f || !selected) return;
+    const n = f.name.toLowerCase();
+    const tipo = n.includes('cie') || n.includes('boletin') || n.includes('boletín') ? 'CIE' : n.includes('memoria') ? 'Memoria' : n.includes('plano') ? 'Planos' : n.includes('licencia') ? 'Licencia' : 'Otro';
+    // Los que hacen falta para el certificado de instalación se marcan solos
+    const paraCie = tipo === 'CIE' || tipo === 'Memoria' || tipo === 'Planos';
+    const comun = { nombre: f.name, tipo: tipo as ProjectDocument['tipo'], fecha: hoyISO(), tamano: `${Math.round(f.size / 1024)} KB`, estado: 'Aprobado' as const, paraCie, mime: f.type };
+    if (firebaseUid) {
+      try {
+        const subido = await subirADrive(f, f.name, selected.obraCodigo || selected.codigo, selected.nombre);
+        onAddDocument(selected.id, { ...comun, driveFileId: subido.id, driveEnlace: subido.enlace, tamanoBytes: subido.tamano });
+        onAviso?.(`Documento subido a tu Drive (${tamanoLegible(subido.tamano)}), carpeta de la obra ${selected.obraCodigo || selected.codigo}.`, 'ok');
+      } catch (err: any) {
+        onAviso?.(err?.message || 'No se pudo subir el documento a Drive.', 'error');
+      }
+      return;
+    }
+    const dataUrl = await leer(f);
+    onAddDocument(selected.id, { ...comun, dataUrl, tamanoBytes: f.size, notas: dataUrl ? undefined : 'Archivo grande: solo se guarda el nombre. Vincula Google Drive para guardarlo entero.' });
+    onAviso?.(dataUrl ? 'Documento guardado dentro de la app. Vincula Google Drive para no gastar espacio de la nube.' : 'El archivo es grande: solo se ha guardado el nombre. Vincula Google Drive para subirlo entero.', dataUrl ? 'ok' : 'error');
   };
+  // Mismo camino que en el cierre de obra: con Drive se comprime y se sube allí, y aquí
+  // solo queda una miniatura. Sin Drive, se guarda dentro de la app con el tope de siempre.
   const subirFoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (!f || !selected) return;
-    const dataUrl = await leer(f);
-    if (!dataUrl) return alert(`La foto supera ${LIMITE_ADJUNTO / 1024} KB. Reduce su tamaño.`);
-    onAddPhoto(selected.id, { titulo: f.name.replace(/\.[^/.]+$/, ''), url: dataUrl, fecha: hoyISO(), tipo: 'durante' });
     e.target.value = '';
+    if (!f || !selected) return;
+    try {
+      const m = await prepararMedia(f, { codigo: selected.obraCodigo || selected.codigo, nombre: selected.nombre }, { hayDrive: !!firebaseUid, limiteSinDrive: LIMITE_ADJUNTO });
+      onAddPhoto(selected.id, { titulo: m.titulo, url: m.url, fecha: hoyISO(), tipo: 'durante', driveFileId: m.driveFileId, driveEnlace: m.driveEnlace, nombreArchivo: m.nombreArchivo, tamano: m.tamano, esVideo: m.esVideo });
+      onAviso?.(`${m.esVideo ? 'Vídeo' : 'Foto'} de ${tamanoLegible(m.tamano)} añadido. ${m.aviso || ''}`, 'ok');
+    } catch (err: any) {
+      onAviso?.(err?.message || 'No se pudo guardar el archivo.', 'error');
+    }
   };
 
   const badge = (estado: Project['estado']) => <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-full border ${(COLOR_ESTADO[estado] || COLOR_ESTADO.Borrador).badge}`}>{estado}</span>;

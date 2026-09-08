@@ -3,6 +3,7 @@
 // (nombre, DNI, fecha/hora y firma dibujada si se le exige) y elige un hueco entre los
 // propuestos. La aceptación se escribe en una subcolección y la app del instalador la recibe
 // en tiempo real y convierte el presupuesto en obra. Nunca se publican costes internos.
+import { textoPrivacidad } from '../data/privacidad';
 import { collection, doc, getDoc, setDoc, addDoc, onSnapshot, query, limit, deleteDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { CompanySettings, FirmaCliente, HuecoPropuesto, Project } from '../types';
@@ -40,6 +41,8 @@ export interface PropuestaPublica {
     lineas: Array<{ concepto: string; cantidad: number; unidad: string; precioUnitario: number; ivaPorcentaje: number; total: number; materiales?: Array<{ nombre: string; cantidad: number; unidad: string }> }>;
   };
   exigirFirma: boolean;
+  // Información de protección de datos que se enseña al cliente antes de firmar
+  privacidad?: { resumen: string; detalle: string };
   huecos: HuecoPropuesto[];
   estado: 'abierta' | 'aceptada' | 'rechazada' | 'caducada';
 }
@@ -52,6 +55,7 @@ export interface AceptacionPublica {
   codigoAceptacion: string;
   huecoElegido?: HuecoPropuesto;
   notasCliente?: string;
+  informadoProteccionDatos?: boolean;
   userAgent?: string;
 }
 
@@ -106,6 +110,7 @@ export function construirPropuesta(project: Project, settings: CompanySettings, 
       lineas,
     },
     exigirFirma,
+    privacidad: textoPrivacidad(settings),
     huecos,
     estado: 'abierta',
   };
@@ -157,7 +162,7 @@ export function escucharAceptaciones(token: string, onAceptacion: (a: Aceptacion
 }
 
 export function firmaDesdeAceptacion(a: AceptacionPublica): FirmaCliente {
-  return { firmadoPor: a.firmadoPor, dni: a.dni, fechaFirma: a.fechaFirma, trazoFirma: a.trazoFirma, codigoAceptacion: a.codigoAceptacion, metodo: 'portal' };
+  return { firmadoPor: a.firmadoPor, dni: a.dni, fechaFirma: a.fechaFirma, trazoFirma: a.trazoFirma, codigoAceptacion: a.codigoAceptacion, metodo: 'portal', informadoProteccionDatos: a.informadoProteccionDatos };
 }
 
 export function enlacePropuesta(token: string): string {
