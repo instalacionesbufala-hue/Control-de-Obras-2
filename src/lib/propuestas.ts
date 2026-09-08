@@ -4,6 +4,7 @@
 // propuestos. La aceptación se escribe en una subcolección y la app del instalador la recibe
 // en tiempo real y convierte el presupuesto en obra. Nunca se publican costes internos.
 import { textoPrivacidad } from '../data/privacidad';
+import { rellenarTexto } from './textos';
 import { collection, doc, getDoc, setDoc, addDoc, onSnapshot, query, limit, deleteDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { CompanySettings, FirmaCliente, HuecoPropuesto, Project } from '../types';
@@ -104,7 +105,7 @@ export function construirPropuesta(project: Project, settings: CompanySettings, 
       baseImponible: Math.round(base * 100) / 100,
       ivaTotal: Math.round(iva * 100) / 100,
       total: Math.round((base + iva) * 100) / 100,
-      notaFinal: project.notaFinal || settings.notaFinalPresupuestoDefecto,
+      notaFinal: rellenarTexto(project.notaFinal || settings.notaFinalPresupuestoDefecto, { validez: settings.diasValidezPresupuesto, vencimiento: settings.diasVencimientoFactura }),
       sinImpuestos: project.sinImpuestos || undefined,
       motivoSinImpuestos: project.sinImpuestos ? project.motivoSinImpuestos : undefined,
       lineas,

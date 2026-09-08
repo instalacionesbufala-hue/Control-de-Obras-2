@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { BadgeEuro, Plus, Download, Search, ShieldCheck, Eye, MessageSquare, X, AlertCircle, Send, Trash2, CheckCircle2, Copy, Check, FileText, Ban, RefreshCcw, ArrowRight } from 'lucide-react';
+import { BadgeEuro, Plus, Download, Search, ShieldCheck, Eye, MessageSquare, X, AlertCircle, Send, Trash2, CheckCircle2, Copy, Check, FileText, Ban, RefreshCcw, ArrowRight, SlidersHorizontal } from 'lucide-react';
 import { DocumentRenderer } from './DocumentRenderer';
 import { PeriodFilter } from './PeriodFilter';
 import { Invoice, Client, Project, CompanySettings, InvoiceLine, TipoFacturaVerifactu, CobroFactura } from '../types';
@@ -9,6 +9,7 @@ import { generarRegistroAlta, verificarCadena, csvLibroEmitidas, autocomprobarAl
 import { totalCobrado, pendienteDe, situacionDe, diasVencida, textoReclamacion } from '../lib/cobros';
 import { xmlDeFactura, anteriorDe, pendientesDeEnvio } from '../lib/verifactuXml';
 import { descargarArchivo } from '../lib/googleCalendar';
+import { DocumentSettingsModal } from './DocumentSettingsModal';
 
 interface Props {
   invoices: Invoice[];
@@ -22,6 +23,7 @@ interface Props {
   onQuitarCobro: (invoiceId: string, cobroId: string) => void;
   onIrABanco?: () => void;
   onIrAGestoria?: () => void;
+  onSaveSettings?: (cambios: Partial<CompanySettings>) => void;
   onUpdateInvoiceStatus: (id: string, estado: Invoice['estado']) => void;
   onUpdateInvoice: (id: string, campos: Partial<Invoice>) => void;
   showNewInvoiceModal: boolean;
@@ -32,7 +34,7 @@ interface Props {
 
 type LineaForm = { id: string; concepto: string; cantidad: number; unidad: string; precioUnitario: number; ivaPorcentaje: number; materialesVisibles?: InvoiceLine['materialesVisibles'] };
 
-export const SalesView: React.FC<Props> = ({ invoices, clients, projects, companySettings, siguienteNumero, siguienteNumeroRectificativa, onCreateInvoice, onRegistrarCobro, onQuitarCobro, onIrABanco, onIrAGestoria, onUpdateInvoiceStatus, onUpdateInvoice, showNewInvoiceModal, setShowNewInvoiceModal, preselectedProject, onAviso }) => {
+export const SalesView: React.FC<Props> = ({ invoices, clients, projects, companySettings, siguienteNumero, siguienteNumeroRectificativa, onCreateInvoice, onRegistrarCobro, onQuitarCobro, onIrABanco, onIrAGestoria, onSaveSettings, onUpdateInvoiceStatus, onUpdateInvoice, showNewInvoiceModal, setShowNewInvoiceModal, preselectedProject, onAviso }) => {
   const [periodo, setPeriodo] = useState<PeriodoFiltro>(periodoActual());
   const [busqueda, setBusqueda] = useState('');
   const [estadoFiltro, setEstadoFiltro] = useState('todos');
@@ -40,6 +42,7 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
   const [verVerifactu, setVerVerifactu] = useState<Invoice | null>(null);
   const [whatsapp, setWhatsapp] = useState<Invoice | null>(null);
   const [copiado, setCopiado] = useState(false);
+  const [ajustesAbiertos, setAjustesAbiertos] = useState(false);
   const [aAnular, setAAnular] = useState<Invoice | null>(null);
   const [verificacion, setVerificacion] = useState<{ ok: boolean; errores: string[] } | null>(null);
   const [algoritmoOk, setAlgoritmoOk] = useState<boolean | null>(null);
@@ -85,7 +88,7 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
     const base = p.presupuestoAceptado;
     const importe = modo === 'resto' ? Math.max(0, base - p.totalFacturado) : modo === 'porcentaje' ? base * (pct / 100) : base;
     const etiqueta = modo === 'resto' ? 'Resto pendiente' : modo === 'porcentaje' ? `${pct} %` : 'Total';
-    return [{ id: uid('l'), concepto: `${etiqueta} · ${p.nombre} (presupuesto ${p.codigo}${p.obraCodigo ? `, obra ${p.obraCodigo}` : ''})`, cantidad: 1, unidad: 'ud', precioUnitario: redondear2(importe), ivaPorcentaje: 21 }];
+    return [{ id: uid('l'), concepto: `${etiqueta} · ${p.nombre} (presupuesto ${p.codigo}${p.obraCodigo ? `, obra ${p.obraCodigo}` : ''})`, cantidad: 1, unidad: 'ud', precioUnitario: redondear2(importe), ivaPorcentaje: companySettings.ivaPorDefecto ?? 21 }];
   };
 
   // Precarga al abrir el modal
@@ -95,6 +98,7 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
     setFecha(hoyISO());
     setFechaVencimiento(addDays(hoyISO(), companySettings.diasVencimientoFactura || 30));
     setNotaFinal(companySettings.condicionesPagoDefecto || '');
+    setMetodoPago(companySettings.metodoPagoPorDefecto || 'Transferencia Bancaria');
     setIsp(!!preselectedProject?.sinImpuestos && /inversi[óo]n del sujeto pasivo/i.test(preselectedProject?.motivoSinImpuestos || ''));
     const p = preselectedProject ? projects.find((x) => x.id === preselectedProject.id) || preselectedProject : null;
     if (p) {
@@ -107,7 +111,7 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
       setClienteId(clients[0]?.id || '');
       setObraId('');
       setModoImporte('completo');
-      setLineas([{ id: uid('l'), concepto: '', cantidad: 1, unidad: 'ud', precioUnitario: 0, ivaPorcentaje: 21 }]);
+      setLineas([{ id: uid('l'), concepto: '', cantidad: 1, unidad: 'ud', precioUnitario: 0, ivaPorcentaje: companySettings.ivaPorDefecto ?? 21 }]);
     }
     const c = clients.find((x) => x.id === (p?.clienteId || clients[0]?.id));
     setIrpf(esAutonomo && companySettings.aplicaRetencionIrpf && c && c.tipoCliente !== 'particular' ? companySettings.retencionIrpfPorcentaje || 15 : 0);
@@ -183,7 +187,7 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
         total: totales.total,
         estado: 'Pendiente',
         metodoPago,
-        plantillaFactura: project?.plantillaPresupuesto || companySettings.plantillaPorDefecto,
+        plantillaFactura: project?.plantillaPresupuesto || companySettings.plantillaFacturaPorDefecto || companySettings.plantillaPorDefecto,
         notaFinal: notaFinal || undefined,
         inversionSujetoPasivo: isp || undefined,
         firmaCliente: project?.firmaCliente,
@@ -318,6 +322,7 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
   };
   return (
     <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto">
+      {ajustesAbiertos && onSaveSettings && <DocumentSettingsModal tipo="factura" settings={companySettings} onSave={(c) => { onSaveSettings(c); onAviso?.('Ajustes de facturas guardados. Se aplican a las facturas nuevas.', 'ok'); }} onClose={() => setAjustesAbiertos(false)} />}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3"><BadgeEuro className="text-blue-600" size={28} /> Facturas</h1>
@@ -326,6 +331,7 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
         <div className="flex flex-wrap items-center gap-2">
           <PeriodFilter value={periodo} onChange={setPeriodo} anios={anios} totalFiltrado={filtradas.length} totalGlobal={invoices.filter((i) => estadoFiltro === 'todos' || i.estado === estadoFiltro).length} />
           <button onClick={exportarCSV} className="bg-white hover:bg-slate-50 border border-slate-200/80 text-slate-700 text-xs font-bold px-4 py-2.5 rounded-2xl shadow-xs flex items-center gap-2 cursor-pointer"><Download size={16} /> CSV del periodo</button>
+          {onSaveSettings && <button type="button" onClick={() => setAjustesAbiertos(true)} title="Vencimiento, plantilla, condiciones, IVA y forma de pago de las facturas nuevas" className="bg-white hover:bg-slate-50 border border-slate-200/80 text-slate-700 text-xs font-bold px-3.5 py-2.5 rounded-2xl shadow-xs flex items-center gap-2 cursor-pointer"><SlidersHorizontal size={15} /> Ajustes</button>}
           <button onClick={() => setShowNewInvoiceModal(true)} className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-5 py-2.5 rounded-2xl shadow-md flex items-center gap-2 cursor-pointer"><Plus size={16} /> Nueva factura {siguienteNumero}</button>
         </div>
       </div>
@@ -516,7 +522,7 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
               </div>
 
               <div className="space-y-3">
-                <div className="flex justify-between items-center"><h3 className="font-black uppercase tracking-wider text-slate-700">Líneas</h3><button type="button" onClick={() => setLineas([...lineas, { id: uid('l'), concepto: '', cantidad: 1, unidad: 'ud', precioUnitario: 0, ivaPorcentaje: 21 }])} className="text-blue-600 font-bold hover:underline flex items-center gap-1 cursor-pointer"><Plus size={14} /> Añadir línea</button></div>
+                <div className="flex justify-between items-center"><h3 className="font-black uppercase tracking-wider text-slate-700">Líneas</h3><button type="button" onClick={() => setLineas([...lineas, { id: uid('l'), concepto: '', cantidad: 1, unidad: 'ud', precioUnitario: 0, ivaPorcentaje: companySettings.ivaPorDefecto ?? 21 }])} className="text-blue-600 font-bold hover:underline flex items-center gap-1 cursor-pointer"><Plus size={14} /> Añadir línea</button></div>
                 {lineas.map((l) => (
                   <div key={l.id} className="p-3 bg-slate-50 rounded-2xl border border-slate-200 grid grid-cols-12 gap-2 items-center">
                     <input value={l.concepto} onChange={(e) => setLineas(lineas.map((x) => (x.id === l.id ? { ...x, concepto: e.target.value } : x)))} placeholder="Concepto" className="col-span-12 sm:col-span-5 bg-white border border-slate-200 rounded-xl px-3 py-1.5" required />
@@ -635,7 +641,7 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
               </div>
               <div><label className="block font-bold text-slate-700 mb-1">Motivo (se imprime en la factura) *</label><input value={rectMotivo} onChange={(e) => setRectMotivo(e.target.value)} placeholder="Ej.: Error en el tipo de IVA aplicado · Descuento pactado no aplicado · Abono por material devuelto" className="w-full border border-slate-200 rounded-xl px-3 py-2" required /></div>
               <div className="space-y-2">
-                <div className="flex justify-between items-center"><h3 className="font-black uppercase tracking-wider text-slate-700">Líneas {rectModo === 'S' ? '(importes correctos)' : '(diferencias; usa negativo para abonar)'}</h3><button type="button" onClick={() => setRectLineas([...rectLineas, { id: uid('l'), concepto: '', cantidad: 1, unidad: 'ud', precioUnitario: 0, ivaPorcentaje: 21 }])} className="text-blue-600 font-bold hover:underline flex items-center gap-1 cursor-pointer"><Plus size={14} /> Añadir línea</button></div>
+                <div className="flex justify-between items-center"><h3 className="font-black uppercase tracking-wider text-slate-700">Líneas {rectModo === 'S' ? '(importes correctos)' : '(diferencias; usa negativo para abonar)'}</h3><button type="button" onClick={() => setRectLineas([...rectLineas, { id: uid('l'), concepto: '', cantidad: 1, unidad: 'ud', precioUnitario: 0, ivaPorcentaje: companySettings.ivaPorDefecto ?? 21 }])} className="text-blue-600 font-bold hover:underline flex items-center gap-1 cursor-pointer"><Plus size={14} /> Añadir línea</button></div>
                 {rectLineas.map((l) => (
                   <div key={l.id} className="p-3 bg-slate-50 rounded-2xl border border-slate-200 grid grid-cols-12 gap-2 items-center">
                     <input value={l.concepto} onChange={(e) => setRectLineas(rectLineas.map((x) => (x.id === l.id ? { ...x, concepto: e.target.value } : x)))} placeholder="Concepto" className="col-span-12 sm:col-span-5 bg-white border border-slate-200 rounded-xl px-3 py-1.5" required />

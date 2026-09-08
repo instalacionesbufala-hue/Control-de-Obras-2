@@ -1,6 +1,7 @@
 // Persistencia local (localStorage) con migraciones, copias de seguridad en archivo
 // y utilidades de fusión con la nube.
 import { AppState, CompanySettings, DocumentTemplate } from '../types';
+import { normalizarValidez } from './textos';
 import { DEFAULT_TEMPLATES } from '../data/plantillas';
 import { separarCatalogo } from './catalogo';
 
@@ -56,8 +57,10 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
   plantillasPersonalizadas: DEFAULT_TEMPLATES,
   logoUrl: '',
   notaFinalPresupuestoDefecto:
-    'Forma de pago: 50 % a la aceptación del presupuesto y 50 % restante a la finalización de la instalación. Validez de la oferta: 30 días naturales. Los trabajos se ejecutan conforme al REBT (ITC-BT-52) e incluyen la documentación técnica necesaria para su legalización. Garantía de instalación: 2 años; equipos según fabricante.',
-  condicionesPagoDefecto: 'Transferencia bancaria a la cuenta indicada. Vencimiento a 30 días desde la fecha de emisión.',
+    'Forma de pago: 50 % a la aceptación del presupuesto y 50 % restante a la finalización de la instalación. Validez de la oferta: {validez} días naturales. Los trabajos se ejecutan conforme al REBT (ITC-BT-52) e incluyen la documentación técnica necesaria para su legalización. Garantía de instalación: 2 años; equipos según fabricante.',
+  condicionesPagoDefecto: 'Transferencia bancaria a la cuenta indicada. Vencimiento a {vencimiento} días desde la fecha de emisión.',
+  ivaPorDefecto: 21,
+  metodoPagoPorDefecto: 'Transferencia Bancaria',
   diasValidezPresupuesto: 30,
   diasVencimientoFactura: 30,
   tecnicos: [],
@@ -114,8 +117,13 @@ export function migrarSettings(raw: Partial<CompanySettings> | undefined): Compa
   if (!s.condicionesPagoDefecto) s.condicionesPagoDefecto = DEFAULT_COMPANY_SETTINGS.condicionesPagoDefecto;
   if (!s.diasValidezPresupuesto) s.diasValidezPresupuesto = 30;
   if (!s.diasVencimientoFactura) s.diasVencimientoFactura = 30;
+  if (!s.ivaPorDefecto) s.ivaPorDefecto = 21;
+  if (!s.metodoPagoPorDefecto) s.metodoPagoPorDefecto = 'Transferencia Bancaria';
+  // Los textos antiguos llevaban "30 días" escrito; pasan al comodín para obedecer al ajuste
+  s.notaFinalPresupuestoDefecto = normalizarValidez(s.notaFinalPresupuestoDefecto);
+  s.condicionesPagoDefecto = normalizarValidez(s.condicionesPagoDefecto);
   if (!s.plantillasPersonalizadas || s.plantillasPersonalizadas.length === 0) s.plantillasPersonalizadas = DEFAULT_TEMPLATES;
-  s.plantillasPersonalizadas = s.plantillasPersonalizadas.map((t: DocumentTemplate) => ({ ...t, base: t.base || (['moderna', 'tecnica', 'compacta', 'clasica'].includes(t.id) ? (t.id as any) : 'moderna') }));
+  s.plantillasPersonalizadas = s.plantillasPersonalizadas.map((t: DocumentTemplate) => ({ ...t, notaFinal: t.notaFinal ? normalizarValidez(t.notaFinal) : t.notaFinal, condicionesPago: t.condicionesPago ? normalizarValidez(t.condicionesPago) : t.condicionesPago, base: t.base || (['moderna', 'tecnica', 'compacta', 'clasica'].includes(t.id) ? (t.id as any) : 'moderna') }));
   return s;
 }
 

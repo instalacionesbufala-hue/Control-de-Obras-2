@@ -32,6 +32,10 @@ export const KitBuilderModal: React.FC<KitBuilderModalProps> = ({
   const [descripcion, setDescripcion] = useState('');
   const [partidas, setPartidas] = useState<KitItem[]>([]);
   const [selectedCatalogId, setSelectedCatalogId] = useState('');
+  // El precio de venta es del kit, no de sus líneas. Hasta que lo fijes a mano (o con un botón
+  // de margen), sigue al margen objetivo para que no veas un 0 € mientras añades material.
+  const [precioVenta, setPrecioVenta] = useState(0);
+  const [precioManual, setPrecioManual] = useState(false);
 
   useEffect(() => {
     if (kitToEdit) {
@@ -40,12 +44,16 @@ export const KitBuilderModal: React.FC<KitBuilderModalProps> = ({
       setCategoria(kitToEdit.categoria || categorias[0] || 'General');
       setDescripcion(kitToEdit.descripcion || '');
       setPartidas(kitToEdit.partidas ? [...kitToEdit.partidas] : []);
+      setPrecioVenta(kitToEdit.precioVentaTotal || 0);
+      setPrecioManual(true);
     } else {
       setNombre('');
       setCodigo(`KIT-${Math.floor(100 + Math.random() * 900)}`);
       setCategoria(categorias[0] || 'General');
       setDescripcion('');
       setPartidas([]);
+      setPrecioVenta(0);
+      setPrecioManual(false);
     }
   }, [kitToEdit, isOpen]);
 
@@ -64,7 +72,7 @@ export const KitBuilderModal: React.FC<KitBuilderModalProps> = ({
       unidad: catItem.unidad || 'ud',
       precioCoste: costeDe(catItem),
       proveedor: catItem.proveedorHabitual,
-      precioVenta: catItem.precioUnitario,
+      precioVenta: costeDe(catItem),
       ivaPorcentaje: catItem.ivaPorcentaje || 21,
     };
 
@@ -100,13 +108,15 @@ export const KitBuilderModal: React.FC<KitBuilderModalProps> = ({
 
   // Calculations
   const precioCosteTotal = partidas.reduce((acc, p) => acc + (Number(p.cantidad) || 0) * (Number(p.precioCoste) || 0), 0);
-  const precioVentaTotal = partidas.reduce((acc, p) => acc + (Number(p.cantidad) || 0) * (Number(p.precioVenta) || 0), 0);
+  // Sin precio fijado, el kit sigue al margen objetivo de la empresa
+  const precioVentaTotal = precioManual ? precioVenta : ventaConMargen(precioCosteTotal, margenObjetivo);
   const beneficioNeto = precioVentaTotal - precioCosteTotal;
   // Margen sobre el coste, el mismo criterio que en materiales y en los presupuestos
   const margenPorcentaje = margenDe(precioCosteTotal, precioVentaTotal);
 
-  // Fija el precio de venta de todas las líneas aplicando el mismo margen sobre su coste
-  const aplicarMargen = (pct: number) => setPartidas((prev) => prev.map((p) => ({ ...p, precioVenta: ventaConMargen(Number(p.precioCoste) || 0, pct) })));
+  // Los botones de margen fijan el precio del kit una vez; las líneas no se tocan
+  const aplicarMargen = (pct: number) => { setPrecioVenta(ventaConMargen(precioCosteTotal, pct)); setPrecioManual(true); };
+  const fijarPrecio = (v: number) => { setPrecioVenta(v); setPrecioManual(true); };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -231,7 +241,7 @@ export const KitBuilderModal: React.FC<KitBuilderModalProps> = ({
                   Desglose de Partidas y Materiales en el Kit ({partidas.length})
                 </h4>
                 <p className="text-[11px] text-slate-500">
-                  Establece coste de compra y precio de venta para calcular la rentabilidad asegurada
+                  Aquí solo va el coste: material y mano de obra. El precio de venta se fija abajo, para el kit entero.
                 </p>
               </div>
 
@@ -280,8 +290,6 @@ export const KitBuilderModal: React.FC<KitBuilderModalProps> = ({
               <div className="space-y-2.5">
                 {partidas.map((item) => {
                   const subCost = (Number(item.cantidad) || 0) * (Number(item.precioCoste) || 0);
-                  const subVenta = (Number(item.cantidad) || 0) * (Number(item.precioVenta) || 0);
-                  const subMargin = subVenta > 0 ? Math.round(((subVenta - subCost) / subVenta) * 100) : 0;
 
                   return (
                     <div 
@@ -331,25 +339,9 @@ export const KitBuilderModal: React.FC<KitBuilderModalProps> = ({
                           <span className="text-[10px] text-slate-400">€</span>
                         </div>
 
-                        <div className="flex items-center gap-1">
-                          <span className="text-[10px] text-slate-400">PVP Ud:</span>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={item.precioVenta}
-                            onChange={(e) => handleUpdateItem(item.id, 'precioVenta', parseFloat(e.target.value) || 0)}
-                            className="w-20 border border-slate-200 rounded-lg px-2 py-1 text-right font-mono font-bold text-blue-600"
-                          />
-                          <span className="text-[10px] text-slate-400">€</span>
-                        </div>
-
-                        <div className="text-right min-w-[70px]">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            subMargin >= 35 ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                          }`}>
-                            {subMargin}% Margen
-                          </span>
+                        <div className="text-right min-w-[84px]">
+                          <span className="text-[10px] text-slate-400 block">Subtotal</span>
+                          <span className="font-mono font-bold text-slate-700">{formatCurrency(subCost)}</span>
                         </div>
 
                         <button
@@ -378,11 +370,19 @@ export const KitBuilderModal: React.FC<KitBuilderModalProps> = ({
             </div>
 
             <div>
-              <p className="text-[10px] font-bold uppercase text-slate-400">PVP de Venta Kit</p>
-              <p className="text-lg font-black text-blue-400 font-mono mt-0.5">
-                {formatCurrency(precioVentaTotal)}
-              </p>
-              <span className="text-[9px] text-slate-400">Base antes de IVA</span>
+              <p className="text-[10px] font-bold uppercase text-slate-400">Precio de venta del kit</p>
+              <div className="flex items-center gap-1 mt-0.5">
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={Math.round(precioVentaTotal * 100) / 100}
+                  onChange={(e) => fijarPrecio(parseFloat(e.target.value) || 0)}
+                  className="w-28 bg-slate-800 border border-slate-700 focus:border-blue-500 focus:outline-hidden rounded-lg px-2 py-1 text-lg font-black text-blue-400 font-mono text-right"
+                />
+                <span className="text-blue-400 font-black">€</span>
+              </div>
+              <span className="text-[9px] text-slate-400">{precioManual ? 'Base antes de IVA. Lo has fijado tú.' : `Base antes de IVA. Sigue tu margen objetivo (${margenObjetivo} %) hasta que lo fijes.`}</span>
             </div>
 
             <div>
@@ -406,20 +406,20 @@ export const KitBuilderModal: React.FC<KitBuilderModalProps> = ({
                 </span>
               </div>
               <div className="flex items-center gap-1 mt-1.5 flex-wrap">
-                <span className="text-[9px] text-slate-500 mr-0.5">Aplicar a todo el kit:</span>
+                <span className="text-[9px] text-slate-500 mr-0.5">Poner el precio con un:</span>
                 {[30, 40, 50, 60, 80].map((p) => (
                   <button
                     key={p}
                     type="button"
                     onClick={() => aplicarMargen(p)}
                     className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer border hover:bg-slate-800 ${p === margenObjetivo ? 'border-emerald-500 text-emerald-300' : 'border-slate-700 text-slate-400'}`}
-                    title={p === margenObjetivo ? 'Tu margen objetivo' : `Recalcular el precio de venta con un ${p} % sobre el coste`}
+                    title={`Fija el precio del kit en coste + ${p} %${p === margenObjetivo ? ' (tu margen objetivo)' : ''}. Las líneas no cambian.`}
                   >
                     {p} %
                   </button>
                 ))}
               </div>
-              <span className="text-[9px] text-slate-400">Sobre el coste. Puedes seguir poniendo el precio a mano en cada línea.</span>
+              <span className="text-[9px] text-slate-400">Sobre el coste del kit. El material es coste fijo: si cambia, cambia el margen, no el precio.</span>
             </div>
           </div>
 

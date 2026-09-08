@@ -12,8 +12,8 @@ export const DEFAULT_TEMPLATES: DocumentTemplate[] = [
     colorPrimario: 'from-blue-600 to-indigo-700',
     acento: '#2563EB',
     fuente: 'sans',
-    condicionesPago: 'Transferencia bancaria a la cuenta indicada. Vencimiento a 30 días desde la fecha de emisión.',
-    notaFinal: 'Forma de pago: 50 % a la aceptación del presupuesto y 50 % restante a la finalización de la instalación. Validez de la oferta: 30 días naturales. Los trabajos se ejecutan conforme al REBT (ITC-BT-52) e incluyen la documentación técnica necesaria para su legalización.',
+    condicionesPago: 'Transferencia bancaria a la cuenta indicada. Vencimiento a {vencimiento} días desde la fecha de emisión.',
+    notaFinal: 'Forma de pago: 50 % a la aceptación del presupuesto y 50 % restante a la finalización de la instalación. Validez de la oferta: {validez} días naturales. Los trabajos se ejecutan conforme al REBT (ITC-BT-52) e incluyen la documentación técnica necesaria para su legalización.',
     pieDePagina: '',
   },
   {
@@ -25,7 +25,7 @@ export const DEFAULT_TEMPLATES: DocumentTemplate[] = [
     acento: '#0F172A',
     fuente: 'mono',
     condicionesPago: 'Pago por transferencia. Certificaciones parciales según avance de obra.',
-    notaFinal: 'Forma de pago: 40 % al aceptar, 40 % al inicio del montaje y 20 % a la puesta en marcha. Validez: 30 días. Instalación conforme al REBT e ITC-BT-52, con certificado de instalación eléctrica (CIE) incluido.',
+    notaFinal: 'Forma de pago: 40 % al aceptar, 40 % al inicio del montaje y 20 % a la puesta en marcha. Validez: {validez} días. Instalación conforme al REBT e ITC-BT-52, con certificado de instalación eléctrica (CIE) incluido.',
     pieDePagina: '',
   },
   {
@@ -36,8 +36,8 @@ export const DEFAULT_TEMPLATES: DocumentTemplate[] = [
     colorPrimario: 'from-emerald-700 to-teal-900',
     acento: '#047857',
     fuente: 'serif',
-    condicionesPago: 'Transferencia bancaria. Vencimiento a 30 días fecha factura.',
-    notaFinal: 'Forma de pago: 50 % a la aceptación y 50 % a la finalización. Oferta válida 30 días. Precios sin IVA salvo indicación contraria. Los trabajos incluyen retirada de escombros y limpieza final de la zona de trabajo.',
+    condicionesPago: 'Transferencia bancaria. Vencimiento a {vencimiento} días fecha factura.',
+    notaFinal: 'Forma de pago: 50 % a la aceptación y 50 % a la finalización. Oferta válida {validez} días. Precios sin IVA salvo indicación contraria. Los trabajos incluyen retirada de escombros y limpieza final de la zona de trabajo.',
     pieDePagina: '',
   },
   {
@@ -49,7 +49,7 @@ export const DEFAULT_TEMPLATES: DocumentTemplate[] = [
     acento: '#D97706',
     fuente: 'helvetica',
     condicionesPago: 'Pago al finalizar la instalación por transferencia o Bizum.',
-    notaFinal: 'Pago: 50 % al aceptar y 50 % al terminar. Validez 30 días. Incluye pruebas de funcionamiento y explicación de uso del equipo al cliente.',
+    notaFinal: 'Pago: 50 % al aceptar y 50 % al terminar. Validez {validez} días. Incluye pruebas de funcionamiento y explicación de uso del equipo al cliente.',
     pieDePagina: '',
   },
   // Modelos añadidos en la segunda revisión: otras bases de maquetación con su propio carácter.
@@ -61,8 +61,8 @@ export const DEFAULT_TEMPLATES: DocumentTemplate[] = [
     colorPrimario: 'from-slate-700 to-slate-900',
     acento: '#1E3A8A',
     fuente: 'helvetica',
-    condicionesPago: 'Transferencia bancaria. Vencimiento a 30 días fecha factura.',
-    notaFinal: 'Forma de pago: 50 % a la aceptación y 50 % a la finalización. Validez de la oferta: 30 días. Instalación conforme al REBT (ITC-BT-52) con boletín eléctrico incluido.',
+    condicionesPago: 'Transferencia bancaria. Vencimiento a {vencimiento} días fecha factura.',
+    notaFinal: 'Forma de pago: 50 % a la aceptación y 50 % a la finalización. Validez de la oferta: {validez} días. Instalación conforme al REBT (ITC-BT-52) con boletín eléctrico incluido.',
     pieDePagina: '',
   },
   {
@@ -74,7 +74,7 @@ export const DEFAULT_TEMPLATES: DocumentTemplate[] = [
     acento: '#0284C7',
     fuente: 'sans',
     condicionesPago: 'Transferencia bancaria o Bizum al finalizar la instalación.',
-    notaFinal: 'Pago: 50 % al aceptar y 50 % al terminar. Validez 30 días. Incluye pruebas de funcionamiento, puesta en marcha y explicación de uso.',
+    notaFinal: 'Pago: 50 % al aceptar y 50 % al terminar. Validez {validez} días. Incluye pruebas de funcionamiento, puesta en marcha y explicación de uso.',
     pieDePagina: '',
   },
   {
@@ -86,7 +86,7 @@ export const DEFAULT_TEMPLATES: DocumentTemplate[] = [
     acento: '#7C3AED',
     fuente: 'sans',
     condicionesPago: 'Transferencia bancaria a la cuenta indicada. Vencimiento a 15 días.',
-    notaFinal: 'Forma de pago: 50 % a la aceptación y 50 % al finalizar. Validez 30 días. Garantía de 2 años en la instalación y la del fabricante en los equipos.',
+    notaFinal: 'Forma de pago: 50 % a la aceptación y 50 % al finalizar. Validez {validez} días. Garantía de 2 años en la instalación y la del fabricante en los equipos.',
     pieDePagina: '',
   },
   {
@@ -97,8 +97,8 @@ export const DEFAULT_TEMPLATES: DocumentTemplate[] = [
     colorPrimario: 'from-slate-900 to-black',
     acento: '#06B6D4',
     fuente: 'sans',
-    condicionesPago: 'Transferencia bancaria. Vencimiento a 30 días fecha factura.',
-    notaFinal: 'Pago: 50 % a la aceptación y 50 % a la finalización. Validez 30 días. Instalación conforme al REBT e ITC-BT-52.',
+    condicionesPago: 'Transferencia bancaria. Vencimiento a {vencimiento} días fecha factura.',
+    notaFinal: 'Pago: 50 % a la aceptación y 50 % a la finalización. Validez {validez} días. Instalación conforme al REBT e ITC-BT-52.',
     pieDePagina: '',
   },
 ];

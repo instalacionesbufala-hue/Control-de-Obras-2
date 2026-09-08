@@ -229,16 +229,12 @@ export const KitsListView: React.FC<KitsListViewProps> = ({
                           <tr>
                             <th className="p-2.5">Concepto</th>
                             <th className="p-2.5 text-center">Cant.</th>
-                            <th className="p-2.5 text-right">Coste Compra</th>
-                            <th className="p-2.5 text-right">PVP Venta</th>
-                            <th className="p-2.5 text-right">Margen</th>
+                            <th className="p-2.5 text-right">Coste</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 font-medium">
                           {kit.partidas?.map((item) => {
                             const cTotal = (Number(item.cantidad) || 0) * (Number(item.precioCoste) || 0);
-                            const vTotal = (Number(item.cantidad) || 0) * (Number(item.precioVenta) || 0);
-                            const mItem = vTotal > 0 ? Math.round(((vTotal - cTotal) / vTotal) * 100) : 0;
 
                             return (
                               <tr key={item.id} className="hover:bg-slate-50/50">
@@ -248,16 +244,6 @@ export const KitsListView: React.FC<KitsListViewProps> = ({
                                 </td>
                                 <td className="p-2.5 text-right font-mono text-slate-600">
                                   {formatCurrency(cTotal)} ({formatCurrency(item.precioCoste)}/{item.unidad})
-                                </td>
-                                <td className="p-2.5 text-right font-mono font-bold text-blue-600">
-                                  {formatCurrency(vTotal)}
-                                </td>
-                                <td className="p-2.5 text-right">
-                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                                    mItem >= 35 ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                                  }`}>
-                                    {mItem}%
-                                  </span>
                                 </td>
                               </tr>
                             );

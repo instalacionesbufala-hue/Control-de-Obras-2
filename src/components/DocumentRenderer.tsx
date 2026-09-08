@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Printer, X, ShieldCheck, CheckCircle2, FileText, Phone, Mail, PenTool, Download, Share2, Send, AlertCircle, RefreshCcw } from 'lucide-react';
+import { rellenarTexto } from '../lib/textos';
 import { generarPDFDesdeElemento, descargarBlob, puedeCompartirArchivos, compartirPDF, nombreArchivoPDF } from '../lib/pdf';
 import { enviarConGmail, correoValido } from '../lib/gmail';
 import { mensajeErrorAuth } from '../lib/cloudSync';
@@ -142,7 +143,7 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
   const clienteNombre = invoice ? invoice.clienteNombre : project?.clienteNombre || client?.nombre || 'Cliente';
   const clienteNif = invoice ? invoice.clienteNif : project?.firmaCliente?.dni || client?.nif || '';
   const clienteDireccion = invoice ? invoice.clienteDireccion : [project?.direccion || client?.direccion, client?.codigoPostal, client?.ciudad].filter(Boolean).join(', ');
-  const notaFinal = invoice ? invoice.notaFinal || plantilla?.condicionesPago || companySettings.condicionesPagoDefecto : project?.notaFinal || plantilla?.notaFinal || companySettings.notaFinalPresupuestoDefecto;
+  const notaFinal = rellenarTexto(invoice ? invoice.notaFinal || plantilla?.condicionesPago || companySettings.condicionesPagoDefecto : project?.notaFinal || plantilla?.notaFinal || companySettings.notaFinalPresupuestoDefecto, { validez: companySettings.diasValidezPresupuesto, vencimiento: companySettings.diasVencimientoFactura });
   const firma = invoice ? invoice.firmaCliente : project?.firmaCliente;
   const esAutonomo = companySettings.tipoEntidad === 'autonomo';
   const etiquetaNif = esAutonomo ? 'NIF' : 'CIF';
@@ -565,7 +566,7 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
         )}
 
         {/* Documento */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-8 flex justify-center bg-slate-200/80 print:p-0 print:bg-white print:overflow-visible">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-8 flex justify-center items-start bg-slate-200/80 print:p-0 print:bg-white print:overflow-visible">
           {documento}
         </div>
       </div>

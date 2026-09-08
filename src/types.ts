@@ -535,6 +535,10 @@ export interface CompanySettings {
   condicionesPagoDefecto: string;
   diasValidezPresupuesto: number;
   diasVencimientoFactura: number;
+  // Ajustes propios de cada tipo de documento (se editan desde su pestaña, no en Configuración)
+  plantillaFacturaPorDefecto?: string; // si falta, se usa plantillaPorDefecto
+  metodoPagoPorDefecto?: Invoice['metodoPago'];
+  ivaPorDefecto?: number; // tipo de IVA con el que nacen las líneas nuevas
   tecnicos: string[];
   franjas: { manana: { inicio: string; fin: string }; tarde: { inicio: string; fin: string } };
   // Qué franjas ofrece la empresa (se puede quitar la tarde o la mañana para todos)

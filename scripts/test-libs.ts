@@ -7,6 +7,7 @@ import { separarCatalogo, actualizarCosteEnKits, margenDe } from '../src/lib/cat
 import { conCobro, sinCobro, totalCobrado, pendienteDe, situacionDe, estadoSegunCobros, resumenCobros } from '../src/lib/cobros';
 import { consumoDesdePresupuesto, consumoActualizado, costeRealMateriales, costePrevistoMateriales, desviaciones, resumenObra } from '../src/lib/consumo';
 import { xmlDeFactura, xmlLote, desgloseDe, pendientesDeEnvio, avisosPrevios } from '../src/lib/verifactuXml';
+import { rellenarTexto, normalizarValidez } from '../src/lib/textos';
 import type { AppState, Invoice, CompanySettings } from '../src/types';
 
 const pad = (s: string, n: number) => s.padEnd(n, ' ').substring(0, n);
@@ -259,4 +260,22 @@ console.log('detecta N43:', leerExtracto(n43, 'x.txt').formato, '· detecta CSV:
   const xmlAnu = xmlDeFactura(anulada, null, settings);
   console.log('xml AEAT · la factura anulada genera registro de anulación',
     xmlAnu.includes('<sum1:RegistroAnulacion>') && !xmlAnu.includes('<sum1:RegistroAlta>') && xmlAnu.includes('<sum1:NumSerieFacturaAnulada>F2026-0002</sum1:NumSerieFacturaAnulada>') ? 'OK' : 'MAL');
+}
+
+// ---- Textos al pie con comodines ----
+// Los textos decían "30 días" a fuego; ahora llevan {validez} / {vencimiento} y se rellenan con el ajuste.
+{
+  const pruebas: Array<[string, boolean]> = [
+    ['rellena la validez', rellenarTexto('Validez de la oferta: {validez} días.', { validez: 7 }) === 'Validez de la oferta: 7 días.'],
+    ['rellena el vencimiento', rellenarTexto('Vencimiento a {vencimiento} días.', { vencimiento: 15 }) === 'Vencimiento a 15 días.'],
+    ['sin valor usa 30', rellenarTexto('{validez}', {}) === '30'],
+    ['texto vacío devuelve vacío', rellenarTexto(undefined, { validez: 7 }) === ''],
+    ['convierte "Validez de la oferta: 30 días naturales"', normalizarValidez('Validez de la oferta: 30 días naturales.') === 'Validez de la oferta: {validez} días naturales.'],
+    ['convierte "Validez 30 días"', normalizarValidez('Pago al terminar. Validez 30 días. Garantía 2 años.') === 'Pago al terminar. Validez {validez} días. Garantía 2 años.'],
+    ['convierte "Oferta válida 30 días"', normalizarValidez('Oferta válida 30 días.') === 'Oferta válida {validez} días.'],
+    ['convierte "Vencimiento a 30 días"', normalizarValidez('Vencimiento a 30 días desde la fecha.') === 'Vencimiento a {vencimiento} días desde la fecha.'],
+    ['no toca otros números de días', normalizarValidez('Plazo de ejecución 10 días. Garantía 730 días.') === 'Plazo de ejecución 10 días. Garantía 730 días.'],
+    ['es idempotente', normalizarValidez(normalizarValidez('Validez: 30 días')) === 'Validez: {validez} días'],
+  ];
+  for (const [nombre, ok] of pruebas) console.log('textos ·', nombre, ok ? 'OK' : 'MAL');
 }

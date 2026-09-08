@@ -99,6 +99,8 @@ function AppPrincipal() {
   }, []);
 
   const [companySettings, setCompanySettings] = useState<CompanySettings>(inicial.companySettings);
+  // Cambios parciales desde las pestañas (ajustes de presupuestos y facturas)
+  const ajustarSettings = (cambios: Partial<CompanySettings>) => setCompanySettings((prev) => ({ ...prev, ...cambios }));
   const [clients, setClients] = useState<Client[]>(inicial.clients);
   const [projects, setProjects] = useState<Project[]>(inicial.projects);
   const [invoices, setInvoices] = useState<Invoice[]>(inicial.invoices);
@@ -929,7 +931,7 @@ function AppPrincipal() {
               onOpenNewExpense={() => { setPreselectedProjectForInvoice(null); setShowNewExpenseModal(true); setActiveTab('gastos'); }} />
           )}
           {(activeTab === 'obras' || activeTab === 'presupuestos') && (
-            <ProjectsView projects={projects} clients={clients} selectedProjectId={selectedProjectId} companySettings={companySettings} catalogCategories={catalogCategories} catalogItems={catalogItems} kits={kits} calendarEvents={calendarEvents} invoices={invoices}
+            <ProjectsView onSaveSettings={ajustarSettings} projects={projects} clients={clients} selectedProjectId={selectedProjectId} companySettings={companySettings} catalogCategories={catalogCategories} catalogItems={catalogItems} kits={kits} calendarEvents={calendarEvents} invoices={invoices}
               firebaseUid={firebaseUser?.uid || null} siguienteCodigo={siguienteCodigoPresupuesto()} modo={activeTab === 'presupuestos' ? 'presupuestos' : 'obras'} abrirCitaDe={citaPendienteDe} onCitaAbierta={() => setCitaPendienteDe(null)}
               onSelectProject={setSelectedProjectId} onCreateProject={handleCreateProject} onUpdateProject={handleUpdateProject} onUpdateProjectStatus={handleUpdateProjectStatus} onUpdateClient={handleUpdateClient}
               onAcceptBudgetAndConvertToObra={handleAcceptBudgetAndConvertToObra} onConfirmarCita={handleConfirmarCita} onDeleteProject={handleDeleteProject} onAddCalendarEvent={handleAddCalendarEvent} onUpdateCalendarEvent={handleUpdateCalendarEvent}
@@ -948,7 +950,7 @@ function AppPrincipal() {
               onAviso={(t, tipo) => setAviso({ texto: t, tipo: tipo || 'info' })} />
           )}
           {activeTab === 'ventas' && (
-            <SalesView invoices={invoices} clients={clients} projects={projects} companySettings={companySettings} siguienteNumero={siguienteNumeroFactura()} siguienteNumeroRectificativa={siguienteNumeroRectificativa()}
+            <SalesView onSaveSettings={ajustarSettings} invoices={invoices} clients={clients} projects={projects} companySettings={companySettings} siguienteNumero={siguienteNumeroFactura()} siguienteNumeroRectificativa={siguienteNumeroRectificativa()}
               onCreateInvoice={handleCreateInvoice} onRegistrarCobro={handleRegistrarCobro} onQuitarCobro={handleQuitarCobro} onIrABanco={() => irA('bancos')} onUpdateInvoiceStatus={handleUpdateInvoiceStatus} onUpdateInvoice={handleUpdateInvoice}
               onIrAGestoria={() => irA('gestoria')} showNewInvoiceModal={showNewInvoiceModal} setShowNewInvoiceModal={setShowNewInvoiceModal} preselectedProject={preselectedProjectForInvoice} onAviso={(t, tipo) => setAviso({ texto: t, tipo: tipo || 'info' })} />
           )}

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FileCheck2, Plus, Search, Calendar, FileText, CheckCircle2, Trash2, Clock, User, MapPin, X, Upload, HardHat, XCircle, Sparkles, Check, ShieldCheck, Send, Phone, Mail, Eye, CalendarDays, Calculator, Lock, PenTool, PackagePlus, Copy, Link as LinkIcon, AlertCircle, EyeOff, Edit3, Image as ImageIcon, Info } from 'lucide-react';
+import { FileCheck2, Plus, Search, Calendar, FileText, CheckCircle2, Trash2, Clock, User, MapPin, X, Upload, HardHat, XCircle, Sparkles, Check, ShieldCheck, Send, Phone, Mail, Eye, CalendarDays, Calculator, Lock, PenTool, PackagePlus, Copy, Link as LinkIcon, AlertCircle, EyeOff, Edit3, Image as ImageIcon, Info, SlidersHorizontal } from 'lucide-react';
 import { Project, Client, ProjectDocument, ProjectPhoto, ProjectLog, PresupuestoPartida, CatalogCategory, CatalogItem, MaterialCostComponent, CalendarInstallation, CompanySettings, Kit, FirmaCliente, HuecoPropuesto, Invoice, ConsumoObra, MOTIVOS_SIN_IMPUESTOS } from '../types';
 import { formatCurrency, formatDate, uid, telefonoWhatsApp, redondear2 } from '../utils/formatters';
 import { PeriodFilter } from './PeriodFilter';
@@ -13,6 +13,7 @@ import { firebaseDisponible } from '../lib/firebase';
 import { CierreObraMovil } from './CierreObraMovil';
 import { prepararMedia, subirADrive, tamanoLegible } from '../lib/drive';
 import { ventaConMargen, costeDe } from '../lib/catalogo';
+import { DocumentSettingsModal } from './DocumentSettingsModal';
 
 interface Props {
   projects: Project[];
@@ -46,6 +47,7 @@ interface Props {
   onOpenNewInvoiceForProject: (p: Project) => void;
   onOpenNewExpenseForProject: (p: Project) => void;
   onAviso?: (texto: string, tipo?: 'ok' | 'error' | 'info') => void;
+  onSaveSettings?: (cambios: Partial<CompanySettings>) => void;
 }
 
 const LIMITE_ADJUNTO = 400 * 1024;
@@ -74,9 +76,10 @@ const recalcPartida = (p: PresupuestoPartida): PresupuestoPartida => {
 };
 
 export const ProjectsView: React.FC<Props> = (props) => {
-  const { projects, clients, selectedProjectId, companySettings, catalogCategories, catalogItems, kits, calendarEvents, invoices, firebaseUid, siguienteCodigo, modo, abrirCitaDe, onCitaAbierta, onSelectProject, onCreateProject, onUpdateProject, onUpdateProjectStatus, onAcceptBudgetAndConvertToObra, onConfirmarCita, onDeleteProject, onAddLog, onAddDocument, onAddPhoto, onGuardarConsumo, onOpenNewInvoiceForProject, onOpenNewExpenseForProject, onAviso } = props;
+  const { projects, clients, selectedProjectId, companySettings, catalogCategories, catalogItems, kits, calendarEvents, invoices, firebaseUid, siguienteCodigo, modo, abrirCitaDe, onCitaAbierta, onSelectProject, onCreateProject, onUpdateProject, onUpdateProjectStatus, onAcceptBudgetAndConvertToObra, onConfirmarCita, onDeleteProject, onAddLog, onAddDocument, onAddPhoto, onGuardarConsumo, onOpenNewInvoiceForProject, onOpenNewExpenseForProject, onAviso, onSaveSettings } = props;
 
   const [periodo, setPeriodo] = useState<PeriodoFiltro>(periodoActual());
+  const [ajustesAbiertos, setAjustesAbiertos] = useState(false);
   const [busqueda, setBusqueda] = useState('');
   const esPresupuestos = modo === 'presupuestos';
   const margenObjetivo = companySettings.margenObjetivo ?? 40;
@@ -226,10 +229,10 @@ export const ProjectsView: React.FC<Props> = (props) => {
     setPartidas((prev) => [...prev, recalcPartida({ id: uid('par'), categoria: cat?.nombre || item.categoriaNombre, concepto: item.concepto, descripcion: item.descripcionDetallada, cantidad: 1, unidad: item.unidad, precioUnitario: item.precioUnitario, ivaPorcentaje: item.ivaPorcentaje || 21, total: 0, materiales: escandallo })]);
   };
   const addKit = (kit: Kit) => {
-    setPartidas((prev) => [...prev, recalcPartida({ id: uid('par'), categoria: kit.categoria, concepto: kit.nombre, descripcion: kit.descripcion, cantidad: 1, unidad: 'ud', precioUnitario: kit.precioVentaTotal, ivaPorcentaje: 21, total: 0, kitId: kit.id, materiales: kit.partidas.map((k) => ({ id: uid('m'), nombre: k.concepto, cantidad: k.cantidad, unidad: k.unidad, costeUnitario: k.precioCoste, totalCoste: redondear2(k.cantidad * k.precioCoste), proveedor: k.proveedor, visibleCliente: false })) })]);
+    setPartidas((prev) => [...prev, recalcPartida({ id: uid('par'), categoria: kit.categoria, concepto: kit.nombre, descripcion: kit.descripcion, cantidad: 1, unidad: 'ud', precioUnitario: kit.precioVentaTotal, ivaPorcentaje: companySettings.ivaPorDefecto ?? 21, total: 0, kitId: kit.id, materiales: kit.partidas.map((k) => ({ id: uid('m'), nombre: k.concepto, cantidad: k.cantidad, unidad: k.unidad, costeUnitario: k.precioCoste, totalCoste: redondear2(k.cantidad * k.precioCoste), proveedor: k.proveedor, visibleCliente: false })) })]);
     setShowKits(false);
   };
-  const addLibre = () => setPartidas((prev) => [...prev, recalcPartida({ id: uid('par'), categoria: 'Otros', concepto: '', cantidad: 1, unidad: 'ud', precioUnitario: 0, ivaPorcentaje: 21, total: 0, materiales: [] })]);
+  const addLibre = () => setPartidas((prev) => [...prev, recalcPartida({ id: uid('par'), categoria: 'Otros', concepto: '', cantidad: 1, unidad: 'ud', precioUnitario: 0, ivaPorcentaje: companySettings.ivaPorDefecto ?? 21, total: 0, materiales: [] })]);
   const updPartida = (id: string, campos: Partial<PresupuestoPartida>) => setPartidas((prev) => prev.map((p) => (p.id === id ? recalcPartida({ ...p, ...campos }) : p)));
   const updMargen = (id: string, margen: number) => setPartidas((prev) => prev.map((p) => (p.id === id ? recalcPartida({ ...p, precioUnitario: redondear2((p.costeInternoTotal || 0) * (1 + margen / 100)), margenPorcentaje: margen }) : p)));
   const updMat = (pid: string, mid: string, campos: Partial<MaterialCostComponent>) => setPartidas((prev) => prev.map((p) => (p.id === pid ? recalcPartida({ ...p, materiales: (p.materiales || []).map((m) => (m.id === mid ? { ...m, ...campos } : m)) }) : p)));
@@ -409,6 +412,7 @@ export const ProjectsView: React.FC<Props> = (props) => {
 
   return (
     <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto">
+      {ajustesAbiertos && onSaveSettings && <DocumentSettingsModal tipo="presupuesto" settings={companySettings} onSave={(c) => { onSaveSettings(c); onAviso?.('Ajustes de presupuestos guardados. Se aplican a los presupuestos nuevos.', 'ok'); }} onClose={() => setAjustesAbiertos(false)} />}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3">{esPresupuestos ? <><FileText className="text-blue-600" size={28} /> Presupuestos</> : <><HardHat className="text-amber-600" size={28} /> Obras</>}</h1>
@@ -416,6 +420,7 @@ export const ProjectsView: React.FC<Props> = (props) => {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <PeriodFilter value={periodo} onChange={setPeriodo} anios={anios} totalFiltrado={filtrados.length} totalGlobal={projects.length} />
+          {esPresupuestos && onSaveSettings && <button type="button" onClick={() => setAjustesAbiertos(true)} title="Validez, plantilla, texto al pie, IVA y margen de los presupuestos nuevos" className="bg-white hover:bg-slate-50 border border-slate-200/80 text-slate-700 text-xs font-bold px-3.5 py-2.5 rounded-2xl shadow-xs flex items-center gap-2 cursor-pointer"><SlidersHorizontal size={15} /> Ajustes</button>}
           {esPresupuestos && <button onClick={abrirCrear} className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2.5 rounded-2xl shadow-md flex items-center gap-2 cursor-pointer"><Plus size={16} /> Nuevo presupuesto {siguienteCodigo}</button>}
         </div>
       </div>

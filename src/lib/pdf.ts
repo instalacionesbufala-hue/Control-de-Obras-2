@@ -5,7 +5,22 @@ import html2canvas from 'html2canvas-pro';
 import { jsPDF } from 'jspdf';
 
 export async function generarPDFDesdeElemento(el: HTMLElement): Promise<Blob> {
-  const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false, windowWidth: Math.max(el.scrollWidth, 800) });
+  // Ojo con windowWidth: html2canvas clona la página en un marco de ese ancho y la app entera se
+  // recoloca como si fuera un móvil, con lo que el documento salía con otro ancho y otra altura
+  // (desproporcionado). Se captura con la ventana real y con el tamaño completo del contenido,
+  // no el de su caja (que en el modal es la del contenedor, más baja que el documento).
+  const canvas = await html2canvas(el, {
+    scale: 2,
+    useCORS: true,
+    backgroundColor: '#ffffff',
+    logging: false,
+    width: el.scrollWidth,
+    height: el.scrollHeight,
+    windowWidth: window.innerWidth,
+    windowHeight: window.innerHeight,
+    scrollX: 0,
+    scrollY: 0,
+  });
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
   const anchoPag = pdf.internal.pageSize.getWidth();
   const altoPag = pdf.internal.pageSize.getHeight();
