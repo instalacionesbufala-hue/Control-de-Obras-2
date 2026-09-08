@@ -3,6 +3,9 @@ import { sha256HexUpper, VECTORES_AEAT, cadenaAlta, urlCotejoQR } from '../src/l
 import { proponerCruces } from '../src/lib/conciliacion';
 import { elegirModelo } from '../src/lib/gemini';
 import { tieneDatosPropios } from '../src/lib/storage';
+import { separarCatalogo, actualizarCosteEnKits, margenDe } from '../src/lib/catalogo';
+import { conCobro, sinCobro, totalCobrado, pendienteDe, situacionDe, estadoSegunCobros, resumenCobros } from '../src/lib/cobros';
+import { consumoDesdePresupuesto, consumoActualizado, costeRealMateriales, costePrevistoMateriales, desviaciones, resumenObra } from '../src/lib/consumo';
 import type { AppState } from '../src/types';
 
 const pad = (s: string, n: number) => s.padEnd(n, ' ').substring(0, n);
@@ -73,4 +76,110 @@ console.log('detecta N43:', leerExtracto(n43, 'x.txt').formato, '· detecta CSV:
     const r = tieneDatosPropios(estado);
     console.log('datos propios ·', nombre, r === esperado ? 'OK' : `MAL (devolvió ${r})`);
   }
+}
+
+// ---- Separación de materiales y kits ----
+// Los "conceptos" con escandallo eran kits disfrazados. Al separarlos, sus materiales salen
+// al catálogo sin repetirse y las líneas del kit quedan enlazadas al material correcto.
+{
+  const cats = [{ id: 'c1', nombre: 'Puntos de recarga', descripcion: '' }];
+  const items: any[] = [
+    { id: 'i1', concepto: 'Instalación 7,4 kW', unidad: 'ud', precioUnitario: 650, ivaPorcentaje: 21, categoriaId: 'c1', categoriaNombre: 'Puntos de recarga',
+      materiales: [
+        { id: 'm1', nombre: 'Cable 3G6', cantidad: 20, unidad: 'm', costeUnitario: 3.9, totalCoste: 78 },
+        { id: 'm2', nombre: 'Mano de obra', cantidad: 4, unidad: 'h', costeUnitario: 28, totalCoste: 112 },
+      ] },
+    { id: 'i2', concepto: 'Instalación 22 kW', unidad: 'ud', precioUnitario: 980, ivaPorcentaje: 21, categoriaId: 'c1', categoriaNombre: 'Puntos de recarga',
+      materiales: [{ id: 'm3', nombre: 'Cable 3G6', cantidad: 35, unidad: 'm', costeUnitario: 3.9, totalCoste: 136.5 }] },
+    { id: 'i3', concepto: 'Tubo M25', unidad: 'm', precioUnitario: 3.5, ivaPorcentaje: 21, categoriaId: 'c1', categoriaNombre: 'Puntos de recarga' },
+  ];
+  const r = separarCatalogo(items, [], cats);
+  const cable = r.materiales.find((m) => m.concepto === 'Cable 3G6');
+  const kit1 = r.kits.find((k) => k.nombre === 'Instalación 7,4 kW');
+  const pruebas: Array<[string, boolean]> = [
+    ['los 2 conceptos con escandallo pasan a kits', r.kits.length === 2],
+    ['el material que se repite no se duplica', r.materiales.filter((m) => m.concepto === 'Cable 3G6').length === 1],
+    ['el que ya era material se conserva', !!r.materiales.find((m) => m.concepto === 'Tubo M25')],
+    ['el coste de compra viaja al material', cable?.precioCompra === 3.9],
+    ['las líneas quedan enlazadas al material', !!kit1 && kit1.partidas.every((p) => !p.itemId || r.materiales.some((m) => m.id === p.itemId))],
+    ['el coste del kit es la suma de sus líneas', kit1?.precioCosteTotal === 190],
+    ['el precio de venta del concepto se conserva', kit1?.precioVentaTotal === 650],
+    ['margen sobre coste correcto', kit1?.margenPorcentaje === margenDe(190, 650)],
+  ];
+  for (const [nombre, ok] of pruebas) console.log('catálogo ·', nombre, ok ? 'OK' : 'MAL');
+
+  // Propagar un coste nuevo solo a los kits elegidos
+  const tras = actualizarCosteEnKits(cable!.id, 5, r.kits, [kit1!.id]);
+  const k1 = tras.find((k) => k.id === kit1!.id)!;
+  const k2 = tras.find((k) => k.id !== kit1!.id)!;
+  console.log('catálogo · el kit elegido recoge el coste nuevo', k1.precioCosteTotal === 5 * 20 + 112 ? 'OK' : `MAL (${k1.precioCosteTotal})`);
+  console.log('catálogo · el kit no elegido no cambia', k2.precioCosteTotal === r.kits.find((k) => k.id === k2.id)!.precioCosteTotal ? 'OK' : 'MAL');
+  console.log('catálogo · el precio de venta nunca se toca solo', k1.precioVentaTotal === 650 ? 'OK' : 'MAL');
+}
+
+// ---- Cobros parciales ----
+// Antes, conciliar el primer 50 % marcaba la factura como pagada entera. Ahora el estado sale
+// de sumar los cobros, y desconciliar lo deshace.
+{
+  const base = { id: 'f1', numero: 'FAC-1', total: 1000, fecha: '2026-09-01', fechaVencimiento: '2026-09-30', estado: 'Pendiente', clienteNombre: 'X', cobros: [] } as any;
+  const c1 = { id: 'c1', fecha: '2026-09-05', importe: 500, transaccionId: 'tx1' };
+  const c2 = { id: 'c2', fecha: '2026-10-10', importe: 500, transaccionId: 'tx2' };
+  const mitad = conCobro(base, c1);
+  const entera = conCobro(mitad, c2);
+  const deshecha = sinCobro(entera, { transaccionId: 'tx2' });
+  const pruebas: Array<[string, boolean]> = [
+    ['sin cobros, nada cobrado', totalCobrado(base) === 0 && pendienteDe(base) === 1000],
+    ['el primer 50 % NO la da por pagada', situacionDe(mitad) === 'parcial' && mitad.estado !== 'Pagada'],
+    ['queda pendiente la otra mitad', pendienteDe(mitad) === 500],
+    ['con los dos cobros queda pagada', situacionDe(entera) === 'cobrada' && entera.estado === 'Pagada'],
+    ['desconciliar el segundo la devuelve a parcial', situacionDe(deshecha) === 'parcial' && deshecha.estado !== 'Pagada'],
+    ['sigue marcada como conciliada por el primer cobro', deshecha.bancoConciliado === true],
+    ['vencida si pasó la fecha y falta dinero', estadoSegunCobros(mitad, '2026-10-15') === 'Vencida'],
+    ['no vencida antes del vencimiento', estadoSegunCobros(mitad, '2026-09-20') === 'Pendiente'],
+    ['una anulada no entra en el cálculo de cobro', situacionDe({ ...base, estado: 'Anulada' } as any) === 'no-aplica'],
+  ];
+  for (const [nombre, ok] of pruebas) console.log('cobros ·', nombre, ok ? 'OK' : 'MAL');
+
+  const r = resumenCobros([mitad, { ...base, id: 'f2', numero: 'FAC-2', total: 300, fechaVencimiento: '2026-08-01' } as any], '2026-10-15');
+  console.log('cobros · el resumen suma solo lo pendiente', r.importe === 800 ? 'OK' : `MAL (${r.importe})`);
+  console.log('cobros · cuenta las vencidas', r.vencidas === 2 ? 'OK' : `MAL (${r.vencidas})`);
+}
+
+// ---- Consumo real de material en obra ----
+// La lista arranca con lo presupuestado y solo se corrigen las cantidades. La rentabilidad
+// real sale de ahí, no de una estimación.
+{
+  const obra: any = {
+    id: 'ob1', presupuestoAceptado: 1000, totalGastos: 0,
+    partidas: [{ id: 'p1', concepto: 'Punto de recarga', cantidad: 2, precioUnitario: 500, ivaPorcentaje: 21, unidad: 'ud', total: 0,
+      materiales: [
+        { id: 'm1', nombre: 'Cable', cantidad: 10, unidad: 'm', costeUnitario: 4, totalCoste: 40 },
+        { id: 'm2', nombre: 'Cargador', cantidad: 1, unidad: 'ud', costeUnitario: 300, totalCoste: 300 },
+      ] }],
+  };
+  const inicial = consumoDesdePresupuesto(obra);
+  // 10 m por unidad y 2 unidades = 20 m previstos
+  const cable = inicial.find((c) => c.nombre === 'Cable')!;
+  const pruebas: Array<[string, boolean]> = [
+    ['la lista sale del escandallo', inicial.length === 2],
+    ['multiplica por las unidades de la partida', cable.cantidadPrevista === 20],
+    ['arranca con lo real igual a lo previsto', inicial.every((c) => c.cantidadReal === c.cantidadPrevista)],
+    ['sin corregir nada, no hay desvío', costeRealMateriales(inicial) === costePrevistoMateriales(inicial)],
+  ];
+  // Sobró cable: solo se usaron 15 m
+  const corregido = inicial.map((c) => (c.id === cable.id ? { ...c, cantidadReal: 15 } : c));
+  pruebas.push(['gastar menos baja el coste real', costeRealMateriales(corregido) === costePrevistoMateriales(inicial) - 20]);
+  const d = desviaciones(corregido);
+  pruebas.push(['la desviación señala la línea y los euros', d.length === 1 && d[0].diferenciaCantidad === -5 && d[0].diferenciaEuros === -20]);
+  // Un imprevisto que no estaba presupuestado
+  const conExtra = [...corregido, { id: 'x1', nombre: 'Tubo extra', unidad: 'm', cantidadPrevista: 0, cantidadReal: 6, costeUnitario: 3, extra: true }];
+  pruebas.push(['el imprevisto suma al coste real', costeRealMateriales(conExtra) === costeRealMateriales(corregido) + 18]);
+  pruebas.push(['el imprevisto no altera lo previsto', costePrevistoMateriales(conExtra) === costePrevistoMateriales(inicial)]);
+  // Al reabrir, se conservan las correcciones
+  const guardadas = consumoActualizado({ ...obra, consumoReal: conExtra });
+  pruebas.push(['al volver conserva lo corregido y los extras', guardadas.find((c) => c.id === cable.id)!.cantidadReal === 15 && guardadas.some((c) => c.extra)]);
+  for (const [nombre, ok] of pruebas) console.log('consumo ·', nombre, ok ? 'OK' : 'MAL');
+
+  const r = resumenObra({ ...obra, consumoReal: conExtra, consumoCerrado: true });
+  console.log('consumo · el margen usa el coste real al cerrar', r.margen === Math.round(((1000 - r.real) / 1000) * 100 * 100) / 100 ? 'OK' : `MAL (${r.margen})`);
 }

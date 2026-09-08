@@ -13,7 +13,7 @@ Además: clientes, materiales y conceptos con escandallo, kits, gastos con imput
 - **Siempre** en el propio navegador (`localStorage`). Funciona sin internet y sin cuenta.
 - **Con Google vinculado** (Configuración → Cuenta de Google): además en Firestore, en la base de datos privada de esa cuenta. Se sincroniza en tiempo real entre dispositivos (gana el último que guarda; antes de aplicar un cambio remoto se conserva la versión anterior, recuperable en Configuración → Copias).
 - **Copias**: archivo JSON descargable y copia manual en la nube. Se recomienda una copia local al mes como mínimo.
-- Límite de la nube: un documento de Firestore admite 1 MB. Las fotos y documentos se guardan incrustados solo si pesan menos de 400 KB; la app avisa cuando se acerca al límite.
+- Límite de la nube: un documento de Firestore admite 1 MB. Por eso las **fotos, vídeos y documentos van a tu Google Drive** cuando la cuenta está vinculada, y en la app solo queda una miniatura. Sin Drive se guardan dentro de la app con un tope de 400 KB y gastando de ese 1 MB.
 
 ## Publicar en Google AI Studio
 
@@ -45,7 +45,7 @@ La carpeta ya trae todo lo necesario: `vite.config.ts` usa rutas relativas (`bas
 
    La propia app te dice qué dominio falta: al fallar, la sección de Google muestra un aviso con el dominio exacto y un botón para copiarlo.
 5. **Firestore**: publica `firestore.rules` en la base de datos que usa la app (el nombre está en `firebase-config.json`, campo `firestoreDatabaseId`; si no es `(default)`, selecciónala en el desplegable de Firestore antes de pegar las reglas).
-6. **Google Calendar y Gmail** (opcionales): en Google Cloud Console del mismo proyecto → *APIs y servicios* → habilita **Google Calendar API** y **Gmail API**. En *Pantalla de consentimiento OAuth* añade tu cuenta como **usuario de prueba** (con la app en modo "Testing" solo pueden conceder permisos las cuentas de prueba, y el permiso dura una hora; para publicar la pantalla de consentimiento Google exige verificación, innecesaria para uso propio).
+6. **Google Calendar, Gmail y Drive** (opcionales): en Google Cloud Console del mismo proyecto → *APIs y servicios* → habilita **Google Calendar API**, **Gmail API** y **Google Drive API**. En *Pantalla de consentimiento OAuth* añade tu cuenta como **usuario de prueba** (con la app en modo "Testing" solo pueden conceder permisos las cuentas de prueba, y el permiso dura una hora; para publicar la pantalla de consentimiento Google exige verificación, innecesaria para uso propio).
 7. Los permisos de Google se piden en el momento de usarlos (guardar una cita, enviar un correo) y también desde Configuración → Google.
 
 ### Cómo subir los archivos sin que falle
@@ -95,9 +95,70 @@ El botón **PDF** descarga el archivo sin enviar nada. **Imprimir / PDF** sigue 
 - En **Configuración → Técnicos y franjas** puedes quitar la franja de mañana o de tarde para toda la empresa o solo para un técnico. La agenda solo ofrece huecos que alguien cubra.
 - Avisos de aceptación y lector de tickets con IA: ver `docs/AVISOS-Y-LECTOR-IA.md`.
 
+## Dónde se guardan las fotos y los documentos
+
+Con la cuenta de Google vinculada, las fotos, los vídeos y los documentos de una obra **se suben a tu Google Drive**, a la carpeta . En la app queda solo una miniatura de unos 20 KB para verla.
+
+Esto importa más de lo que parece. Antes las fotos se guardaban dentro de los datos de la app, y esos datos viajan a la nube como **un único documento con un tope duro de 1 MB**: con dos o tres fotos la sincronización dejaba de funcionar. Drive da 15 GB gratis y las carpetas son tuyas, así que puedes copiarlas a un disco externo cuando quieras.
+
+- Las **fotos se comprimen** antes de subirlas: una de 4 MB del móvil baja a unos 400 KB sin perder legibilidad.
+- Los **vídeos** se suben tal cual y solo se admiten con Drive vinculado. No se pueden comprimir dentro del navegador sin destrozar la calidad, así que no se intenta.
+- Los **PDF** se suben tal cual: comprimirlos en el navegador daría muy poca ganancia.
+- El permiso que se pide es `drive.file`, que deja ver a la app **solo los archivos que ella crea**, nunca el resto de tu Drive. Es un permiso no sensible, así que no exige la verificación de Google.
+- Sin Drive vinculado todo sigue funcionando, pero con el tope de 400 KB por archivo y gastando del limitado espacio de la nube.
+
+En la **ficha del cliente** se reúnen las fotos y vídeos de todas sus obras y la lista de documentos, marcando los que sirven para el certificado de instalación eléctrica (CIE).
+
+## Copia local: no dependas solo de Google
+
+Si pierdes el acceso a tu cuenta de Google, pierdes la nube, el Drive y el correo de golpe. Por eso la app te recuerda descargar una copia a tu ordenador cada cierto tiempo, configurable en Configuración → Copias de seguridad, siete días por defecto.
+
+El aviso sale en la parte de arriba de la app y se puede cerrar hasta la próxima vez que la abras. Guarda ese archivo en un disco aparte, no en la misma cuenta de Google.
+
+## Cerrar la obra desde el móvil: material real y rentabilidad
+
+En la ficha de una obra hay una pestaña **Material real**, pensada para usarla a pie de instalación con el teléfono.
+
+- El material del presupuesto **ya viene listado** con la cantidad prevista puesta. Solo hay que corregir lo que sobró o faltó, con botones grandes de más y menos.
+- Botón de **hacer foto** que abre directamente la cámara y la guarda en la obra.
+- **Añadir material imprevisto**, buscándolo en el catálogo o escribiéndolo si no está.
+- Arriba, siempre a la vista, el previsto, el real, el desvío en euros y el margen real. Debajo, en qué líneas concretas se ha desviado.
+- Al pulsar **Cerrar consumo**, la rentabilidad de esa obra deja de usar la estimación del escandallo y pasa a usar el material que de verdad se gastó. Queda anotado en la bitácora con las dos cifras.
+
+Nada de esto sale en el presupuesto ni en la factura: es control interno de coste.
+
+## Cobros: cuándo una factura está cobrada
+
+Una factura no se marca cobrada a mano: se calcula sumando sus cobros. Y los cobros llegan sobre todo del banco.
+
+- **Al conciliar un ingreso** en Banco y conciliación, ese importe se anota como cobro de la factura. Con el reparto habitual de 50 % al aceptar y 50 % al terminar, hacen falta **dos ingresos** para darla por cobrada.
+- Mientras falte dinero, la factura queda **A medias** o **Por cobrar**, con los días de retraso si ha vencido.
+- Si deshaces la conciliación, ese cobro desaparece y la factura vuelve a su estado real.
+- Para lo que no pasa por el extracto (efectivo, Bizum, un banco que no importas) hay un botón para **anotar el cobro a mano**, con atajos de 50 % y del resto pendiente.
+- Desde ese mismo panel puedes **reclamar por WhatsApp** con el texto ya redactado, que dice cuánto falta y cuántos días lleva.
+
+En la portada, el aviso indica cuántas facturas están sin cobrar, **cuánto falta de verdad** contando los cobros parciales, y los días que lleva la más vieja.
+
+## Materiales y kits
+
+Son dos cosas distintas y viven en solapas separadas dentro de la misma pestaña.
+
+- **Materiales**: artículos sueltos que compras. Nombre, referencia, unidad, **precio de compra**, proveedor y un PVP por si lo vendes suelto. El precio de compra es interno y no sale nunca en un presupuesto ni en una factura.
+- **Kits**: agrupaciones de materiales del catálogo más mano de obra y otros trabajos. De ahí salen el coste, el precio de venta y el margen. Es lo que insertas como partida en un presupuesto.
+
+Al actualizar la app, los "conceptos" antiguos que llevaban escandallo dentro se convierten en kits y sus materiales salen al catálogo sin repetirse. No se pierde nada y los presupuestos ya hechos no cambian.
+
+**Si cambias el precio de compra de un material** que usan varios kits, la app te pregunta a cuáles se lo aplicas, con la lista delante y su margen actual. El precio de venta de los kits no se toca: solo cambia el coste, para que veas si la subida se ha comido el beneficio y decidas tú. También puedes aplicarlo solo al material y dejar los kits como estaban.
+
+**Margen.** En Configuración fijas tu margen objetivo, y con él la app sugiere precios de venta en tres sitios: al crear un material, al montar un kit y en cada partida del presupuesto. Siempre puedes escribir el precio a mano, como hasta ahora; el selector es un atajo, no una imposición.
+
+**Sugerencia de precio.** Al dar de alta un material, si en tus gastos hay una compra parecida, la app te ofrece ese importe indicando de qué factura sale. Es un dato tuyo, no una estimación inventada.
+
 ## Usar la app en varios dispositivos
 
 Basta con abrir la web y pulsar **Vincular cuenta de Google** con la misma cuenta. Todo lo tuyo viaja en la nube de tu cuenta: clientes, presupuestos, obras, facturas, gastos, banco, catálogo, kits y **toda la configuración**, incluidas la clave de Gemini, el modelo elegido y la dirección del script de avisos. No hay que volver a escribir nada.
+
+Se sincroniza **toda** la pantalla de Configuración: datos fiscales, logotipo, numeración y prefijos, técnicos y franjas, plantillas con sus textos al pie, clave de Gemini, modelo elegido, dirección del script de avisos y datos del certificado.
 
 Dos cosas son de cada dispositivo por diseño y no se sincronizan:
 

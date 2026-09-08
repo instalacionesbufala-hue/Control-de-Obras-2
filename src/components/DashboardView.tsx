@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { resumenCobros } from '../lib/cobros';
 import { BadgeEuro, Receipt, BarChart3, Wallet, Calendar, AlertTriangle, Plus, ChevronRight, TrendingUp, TrendingDown, HardHat, CheckCircle2, SlidersHorizontal, X, RotateCcw, FileCheck2, Phone } from 'lucide-react';
 import { Project, Invoice, Expense, BankTransaction, CalendarInstallation, Client, CompanySettings } from '../types';
 import { formatCurrency, telefonoWhatsApp } from '../utils/formatters';
@@ -70,6 +71,8 @@ export const DashboardView: React.FC<Props> = ({ projects, invoices, expenses, b
     return { invP, expP, ventas, gastos, gastosSL, variacion, obrasActivas, facturadoObras, presupuestadoObras, costeObras, margen, ultimoMov, sinConciliar };
   }, [invoices, expenses, projects, bankTransactions, periodo, periodoAnterior]);
 
+  // Lo que de verdad queda por cobrar, contando los cobros parciales ya recibidos
+  const cobros = resumenCobros(invoices);
   const pendientesCobro = invoices.filter((i) => i.estado === 'Pendiente' || i.estado === 'Vencida');
   const hoy = hoyISO();
   const vencidas = pendientesCobro.filter((i) => i.fechaVencimiento < hoy);
@@ -112,7 +115,7 @@ export const DashboardView: React.FC<Props> = ({ projects, invoices, expenses, b
           <div className="flex items-center gap-4">
             <div className="w-11 h-11 rounded-2xl bg-amber-500 text-white flex items-center justify-center shrink-0"><AlertTriangle size={22} /></div>
             <div>
-              <p className="text-sm font-black text-amber-950">{pendientesCobro.length} factura{pendientesCobro.length > 1 ? 's' : ''} por cobrar · {formatCurrency(pendientesCobro.reduce((a, b) => a + b.total, 0))}{vencidas.length > 0 ? ` · ${vencidas.length} vencida${vencidas.length > 1 ? 's' : ''}` : ''}</p>
+              <p className="text-sm font-black text-amber-950">{cobros.cuantas} factura{cobros.cuantas > 1 ? 's' : ''} sin cobrar · {formatCurrency(cobros.importe)} pendiente{cobros.diasDeLaMasVieja > 0 ? ` · la más vieja lleva ${cobros.diasDeLaMasVieja} días` : ''}{vencidas.length > 0 ? ` · ${vencidas.length} vencida${vencidas.length > 1 ? 's' : ''}` : ''}</p>
               <p className="text-xs text-amber-900/80 mt-0.5">{vencidas[0] ? `${vencidas[0].numero} de ${vencidas[0].clienteNombre} venció el ${fechaES(vencidas[0].fechaVencimiento)}.` : `La más próxima vence el ${fechaES([...pendientesCobro].sort((a, b) => a.fechaVencimiento.localeCompare(b.fechaVencimiento))[0].fechaVencimiento)}.`}</p>
             </div>
           </div>

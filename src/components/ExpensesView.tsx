@@ -1,7 +1,8 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Receipt, Plus, Search, HardHat, Building2, CheckCircle2, X, Eye, RefreshCw, Edit3, Trash2, Paperclip, Download, AlertCircle, Info, Sparkles } from 'lucide-react';
+import { Receipt, Plus, Search, HardHat, Building2, CheckCircle2, X, Eye, RefreshCw, Edit3, Trash2, Paperclip, Download, AlertCircle, Info, Sparkles, Boxes } from 'lucide-react';
 import { extraerDatosTicket, comprimirImagen, DatosTicket } from '../lib/gemini';
-import { Expense, Project, Supplier, CompanySettings, ExpenseCategoria } from '../types';
+import { proponerPreciosDesdeFactura, CoincidenciaPrecio } from '../lib/catalogo';
+import { Expense, Project, Supplier, CompanySettings, ExpenseCategoria, CatalogItem } from '../types';
 import { formatCurrency, formatDate, uid, redondear2 } from '../utils/formatters';
 import { PeriodFilter } from './PeriodFilter';
 import { PeriodoFiltro, periodoActual, coincidePeriodo, aniosDisponibles, hoyISO, etiquetaPeriodo } from '../utils/dates';
@@ -11,6 +12,8 @@ interface Props {
   projects: Project[];
   suppliers?: Supplier[];
   companySettings: CompanySettings;
+  catalogItems?: CatalogItem[];
+  onActualizarPrecios?: (cambios: Array<{ id: string; precioCompra: number; origen: string }>) => void;
   onCreateExpense: (expense: Expense) => void;
   onCreateSupplier?: (supplier: Supplier) => void;
   onUpdateExpense: (id: string, campos: Partial<Expense>) => void;
@@ -27,7 +30,7 @@ const LIMITE_ADJUNTO = 400 * 1024;
 type Form = { proveedor: string; cifProveedor: string; numeroFactura: string; concepto: string; tipo: 'SL' | 'Obra'; categoria: ExpenseCategoria; obraId: string; baseImponible: number; ivaPorcentaje: number; irpfRetencion: number; fecha: string; metodoPago: string; estadoPago: 'Pagado' | 'Pendiente'; esRecurrente: boolean; adjuntoNombre?: string; adjuntoDataUrl?: string };
 const formVacio = (p?: Project | null): Form => ({ proveedor: '', cifProveedor: '', numeroFactura: '', concepto: '', tipo: p ? 'Obra' : 'SL', categoria: 'Materiales', obraId: p?.id || '', baseImponible: 0, ivaPorcentaje: 21, irpfRetencion: 0, fecha: hoyISO(), metodoPago: 'Tarjeta', estadoPago: 'Pagado', esRecurrente: false });
 
-export const ExpensesView: React.FC<Props> = ({ expenses, projects, suppliers = [], companySettings, onCreateExpense, onCreateSupplier, onUpdateExpense, onDeleteExpense, showNewExpenseModal, setShowNewExpenseModal, preselectedProject }) => {
+export const ExpensesView: React.FC<Props> = ({ expenses, projects, suppliers = [], companySettings, catalogItems = [], onActualizarPrecios, onCreateExpense, onCreateSupplier, onUpdateExpense, onDeleteExpense, showNewExpenseModal, setShowNewExpenseModal, preselectedProject }) => {
   const [periodo, setPeriodo] = useState<PeriodoFiltro>(periodoActual());
   const [tab, setTab] = useState<'todos' | 'SL' | 'Obra' | 'recurrentes'>('todos');
   const [busqueda, setBusqueda] = useState('');
@@ -42,6 +45,9 @@ export const ExpensesView: React.FC<Props> = ({ expenses, projects, suppliers = 
   const [archivoIA, setArchivoIA] = useState<string | null>(null);
   const [leyendoIA, setLeyendoIA] = useState(false);
   const [avisoIA, setAvisoIA] = useState<{ texto: string; tipo: 'ok' | 'aviso' } | null>(null);
+  // Materiales del catálogo reconocidos en la factura cuyo precio de compra ha cambiado
+  const [preciosPropuestos, setPreciosPropuestos] = useState<CoincidenciaPrecio[]>([]);
+  const [preciosElegidos, setPreciosElegidos] = useState<Set<string>>(new Set());
   const hayIA = !!companySettings.geminiApiKey?.trim();
   const fileRef = useRef<HTMLInputElement>(null);
   const anios = aniosDisponibles(expenses.map((e) => e.fecha));
@@ -52,6 +58,8 @@ export const ExpensesView: React.FC<Props> = ({ expenses, projects, suppliers = 
       setError(null);
       setArchivoIA(null);
       setAvisoIA(null);
+      setPreciosPropuestos([]);
+      setPreciosElegidos(new Set());
     }
   }, [showNewExpenseModal, preselectedProject]);
 
@@ -125,11 +133,15 @@ export const ExpensesView: React.FC<Props> = ({ expenses, projects, suppliers = 
         categoria: (d.categoria as ExpenseCategoria) || (prov?.categoria as ExpenseCategoria) || x.categoria,
         esRecurrente: x.esRecurrente || detectaRecurrente(d.concepto || ''),
       }));
+      // ¿Alguna línea de la factura es un material del catálogo con otro precio?
+      const props = onActualizarPrecios ? proponerPreciosDesdeFactura(d.lineas || [], catalogItems) : [];
+      setPreciosPropuestos(props);
+      setPreciosElegidos(new Set(props.filter((p) => p.confianza === 'alta').map((p) => p.material.id)));
       const nuevoProv = !prov && !!d.proveedor;
       if (nuevoProv) setAltaProveedor(true);
       const total = d.total !== undefined ? ` Total leído: ${formatCurrency(d.total)}.` : '';
       setAvisoIA({
-        texto: `Datos leídos${d.confianza === 'baja' ? ' con poca seguridad: revisa los importes' : d.confianza === 'media' ? ', revísalos' : ''}.${total}${d.observaciones ? ` ${d.observaciones}` : ''}${nuevoProv ? ' El proveedor no existe: se dará de alta al guardar, corrige lo que veas mal.' : ''} Nada se guarda hasta que pulses Guardar.`,
+        texto: `Datos leídos${d.confianza === 'baja' ? ' con poca seguridad: revisa los importes' : d.confianza === 'media' ? ', revísalos' : ''}.${total}${d.observaciones ? ` ${d.observaciones}` : ''}${nuevoProv ? ' El proveedor no existe: se dará de alta al guardar, corrige lo que veas mal.' : ''}${props.length ? ` Y he reconocido ${props.length} material${props.length > 1 ? 'es' : ''} del catálogo con otro precio.` : ''} Nada se guarda hasta que pulses Guardar.`,
         tipo: d.confianza === 'baja' ? 'aviso' : 'ok',
       });
     } catch (err: any) {
@@ -187,6 +199,11 @@ export const ExpensesView: React.FC<Props> = ({ expenses, projects, suppliers = 
     } else {
       const nuevo = construir(form);
       onCreateExpense(nuevo);
+      // Precios de compra marcados en el panel de la IA
+      if (onActualizarPrecios && preciosElegidos.size > 0) {
+        const origen = `factura ${nuevo.numeroFactura || 's/n'} de ${nuevo.proveedor}`;
+        onActualizarPrecios(preciosPropuestos.filter((p) => preciosElegidos.has(p.material.id)).map((p) => ({ id: p.material.id, precioCompra: p.precioNuevo, origen })));
+      }
       if (altaProveedor && onCreateSupplier && !suppliers.some((s) => s.nombre.toLowerCase() === nuevo.proveedor.toLowerCase())) {
         onCreateSupplier({ id: uid('sup'), nombre: nuevo.proveedor, cif: nuevo.cifProveedor, categoria: nuevo.categoria, fechaAlta: hoyISO() });
       }
@@ -297,6 +314,42 @@ export const ExpensesView: React.FC<Props> = ({ expenses, projects, suppliers = 
                 </div>
               </div>
               {avisoIA && <div className={`p-3 rounded-xl border flex items-start gap-2 ${avisoIA.tipo === 'ok' ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}><Sparkles size={14} className="shrink-0 mt-0.5" /> <span>{avisoIA.texto}</span></div>}
+              {preciosPropuestos.length > 0 && (
+                <div className="p-3.5 bg-purple-50/70 border border-purple-200 rounded-2xl space-y-2">
+                  <div className="flex items-start gap-2 text-purple-900">
+                    <Boxes size={15} className="shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="font-black">Poner al día el precio de compra en el catálogo</p>
+                      <p className="text-[11px]">Esta factura trae precios distintos de los que tienes guardados. Marca los que quieras actualizar; se guardarán al pulsar Guardar gasto. Los kits no cambian aquí: cuando edites el material, la app te preguntará a cuáles se lo aplicas.</p>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                    {preciosPropuestos.map((p) => {
+                      const sel = preciosElegidos.has(p.material.id);
+                      const sube = p.variacion > 0;
+                      return (
+                        <label key={p.material.id} className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-pointer bg-white ${sel ? 'border-purple-300' : 'border-slate-200'}`}>
+                          <input type="checkbox" checked={sel} onChange={() => { const s = new Set(preciosElegidos); if (sel) s.delete(p.material.id); else s.add(p.material.id); setPreciosElegidos(s); }} className="accent-purple-600" />
+                          <span className="flex-1 min-w-0">
+                            <span className="font-bold text-slate-800 block truncate">{p.material.concepto}</span>
+                            <span className="text-[10px] text-slate-500 block truncate">en la factura: «{p.descripcionFactura}»{p.confianza === 'media' ? ' · parecido dudoso, compruébalo' : ''}</span>
+                          </span>
+                          <span className="text-right shrink-0">
+                            <span className="block font-mono text-slate-400 line-through text-[10px]">{formatCurrency(p.precioAnterior)}</span>
+                            <span className={`block font-black ${sube ? 'text-rose-600' : 'text-emerald-600'}`}>{formatCurrency(p.precioNuevo)}</span>
+                            <span className={`block text-[10px] font-bold ${sube ? 'text-rose-500' : 'text-emerald-500'}`}>{sube ? '+' : ''}{p.variacion} %</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="flex gap-2 text-[11px]">
+                    <button type="button" onClick={() => setPreciosElegidos(new Set(preciosPropuestos.map((p) => p.material.id)))} className="px-2.5 py-1 bg-white border border-purple-200 rounded-lg font-bold cursor-pointer">Marcar todos</button>
+                    <button type="button" onClick={() => setPreciosElegidos(new Set())} className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg font-bold cursor-pointer">Ninguno</button>
+                    <span className="ml-auto self-center text-purple-800 font-bold">{preciosElegidos.size} de {preciosPropuestos.length} se actualizarán</span>
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block font-bold text-slate-700 mb-1">Proveedor *</label><input list="proveedores" value={form.proveedor} onChange={(e) => elegirProveedor(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2 font-bold" required /><datalist id="proveedores">{suppliers.map((s) => <option key={s.id} value={s.nombre} />)}</datalist></div>
                 <div><label className="block font-bold text-slate-700 mb-1">NIF del proveedor</label><input value={form.cifProveedor} onChange={(e) => setForm({ ...form, cifProveedor: e.target.value.toUpperCase() })} placeholder="B12345678" className="w-full border border-slate-200 rounded-xl px-3 py-2 font-mono" /></div>

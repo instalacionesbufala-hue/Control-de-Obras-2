@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Users, Plus, Search, HardHat, FolderOpen, Image as ImageIcon, Phone, Mail, FileText, ChevronRight, X, BadgeEuro, Download, Upload, Trash2, Edit3, Eye, LayoutGrid, List, MapPin } from 'lucide-react';
+import { Users, Plus, Search, HardHat, FolderOpen, Image as ImageIcon, Phone, Mail, FileText, ChevronRight, X, BadgeEuro, Download, Upload, Trash2, Edit3, Eye, LayoutGrid, List, MapPin, Video } from 'lucide-react';
 import { Client, Project, Invoice, ProjectPhoto, ProjectDocument, TipoCliente } from '../types';
 import { formatCurrency, uid, telefonoWhatsApp } from '../utils/formatters';
 import { hoyISO } from '../utils/dates';
@@ -231,6 +231,50 @@ export const ClientsView: React.FC<Props> = ({ clients, projects, invoices, onCr
                     <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-1.5"><p className="font-black text-slate-900 uppercase text-[11px]">Contacto</p><p className="flex items-center gap-2"><Phone size={13} className="text-slate-400" /> {cliente.telefono || '—'}</p><p className="flex items-center gap-2"><Mail size={13} className="text-slate-400" /> {cliente.email || '—'}</p><p className="flex items-center gap-2"><MapPin size={13} className="text-slate-400" /> {[cliente.direccion, cliente.codigoPostal, cliente.ciudad].filter(Boolean).join(', ') || '—'}</p>{cliente.notas && <p className="text-slate-500 pt-1 border-t border-slate-200 italic">{cliente.notas}</p>}</div>
                     <div className="p-4 bg-blue-50/60 rounded-2xl border border-blue-200 space-y-1.5"><p className="font-black text-blue-900 uppercase text-[11px]">Aceptación de presupuestos</p><p className="text-blue-800">{cliente.exigirFirma === false ? 'No se exige firma manuscrita: acepta indicando nombre y CIF (validación por pedido).' : 'Se exige firma en pantalla además de nombre y DNI.'}</p><button onClick={() => onUpdateClient(cliente.id, { exigirFirma: !(cliente.exigirFirma !== false) })} className="mt-1 px-3 py-1.5 bg-white border border-blue-200 text-blue-700 rounded-lg text-xs font-bold cursor-pointer">Cambiar a {cliente.exigirFirma === false ? 'exigir firma' : 'sin firma'}</button></div>
                   </div>
+                  {(() => {
+                    // Todo el material gráfico y documental de las obras de este cliente,
+                    // reunido aquí para enseñárselo o para preparar el CIE sin ir obra por obra.
+                    const obrasCli = projects.filter((p) => p.clienteId === cliente.id);
+                    const medios = obrasCli.flatMap((p) => (p.fotos || []).map((ft) => ({ ...ft, obra: p.obraCodigo || p.codigo })));
+                    const docs = obrasCli.flatMap((p) => (p.documentos || []).map((d) => ({ ...d, obra: p.obraCodigo || p.codigo })));
+                    const docsCie = docs.filter((d) => d.paraCie || d.tipo === 'CIE' || d.tipo === 'Memoria' || d.tipo === 'Planos');
+                    if (!medios.length && !docs.length) return null;
+                    return (
+                      <div className="space-y-3">
+                        {medios.length > 0 && (
+                          <div className="space-y-2">
+                            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><ImageIcon size={16} className="text-blue-600" /> Fotos y vídeos de campo <span className="text-[11px] font-normal text-slate-400">({medios.length})</span></h3>
+                            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                              {medios.slice(0, 12).map((m) => (
+                                <a key={m.id} href={m.driveEnlace || m.url} target="_blank" rel="noreferrer" className="group relative rounded-xl overflow-hidden border border-slate-200 aspect-square bg-slate-100 block" title={`${m.titulo} · ${m.obra}`}>
+                                  {m.url ? <img src={m.url} alt={m.titulo} className="w-full h-full object-cover" /> : <span className="w-full h-full flex items-center justify-center text-slate-400"><FileText size={20} /></span>}
+                                  {m.esVideo && <span className="absolute inset-0 flex items-center justify-center bg-slate-900/40 text-white"><Video size={20} /></span>}
+                                  <span className="absolute bottom-0 inset-x-0 bg-slate-900/70 text-white text-[9px] px-1 py-0.5 truncate">{m.obra}</span>
+                                </a>
+                              ))}
+                            </div>
+                            {medios.length > 12 && <p className="text-[10px] text-slate-400">y {medios.length - 12} más en la ficha de cada obra</p>}
+                          </div>
+                        )}
+                        {docs.length > 0 && (
+                          <div className="space-y-2">
+                            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><FileText size={16} className="text-indigo-600" /> Documentos de las obras <span className="text-[11px] font-normal text-slate-400">({docs.length})</span></h3>
+                            {docsCie.length > 0 && <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">{docsCie.length} documento{docsCie.length > 1 ? 's' : ''} de los necesarios para el certificado de instalación eléctrica (CIE).</p>}
+                            <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden">
+                              {docs.slice(0, 10).map((d) => (
+                                <div key={d.id} className="p-2.5 flex items-center gap-2 text-xs hover:bg-slate-50">
+                                  <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded shrink-0 ${d.paraCie || d.tipo === 'CIE' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>{d.tipo}</span>
+                                  <span className="flex-1 min-w-0"><span className="font-bold text-slate-800 block truncate">{d.nombre}</span><span className="text-[10px] text-slate-400">{d.obra} · {d.fecha}</span></span>
+                                  {(d.driveEnlace || d.dataUrl) && <a href={d.driveEnlace || d.dataUrl} target="_blank" rel="noreferrer" download={d.driveEnlace ? undefined : d.nombre} className="px-2 py-1 bg-blue-50 text-blue-700 rounded-lg font-bold shrink-0">Abrir</a>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   <div className="space-y-2">
                     <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><HardHat size={16} className="text-blue-600" /> Presupuestos y obras</h3>
                     <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden">

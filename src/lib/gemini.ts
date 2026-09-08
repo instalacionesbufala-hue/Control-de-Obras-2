@@ -24,6 +24,16 @@ export interface DatosTicket {
   esTicketSinFactura?: boolean;
   confianza?: 'alta' | 'media' | 'baja';
   observaciones?: string;
+  lineas?: LineaTicket[];
+}
+
+// Líneas de detalle de la factura del proveedor: sirven para poner al día el precio de compra
+// de los materiales del catálogo.
+export interface LineaTicket {
+  descripcion: string;
+  cantidad?: number;
+  unidad?: string;
+  precioUnitario?: number;
 }
 
 export interface ModeloGemini {
@@ -52,6 +62,20 @@ const ESQUEMA = {
     esTicketSinFactura: { type: 'BOOLEAN', description: 'true si es un ticket simplificado' },
     confianza: { type: 'STRING', description: 'alta, media o baja según la legibilidad' },
     observaciones: { type: 'STRING', description: 'Dudas o campos poco legibles, en una frase. Vacío si todo está claro' },
+    lineas: {
+      type: 'ARRAY',
+      description: 'Cada línea de detalle del documento. Vacío si es un ticket sin desglose.',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          descripcion: { type: 'STRING', description: 'Descripción del artículo tal y como aparece' },
+          cantidad: { type: 'NUMBER', description: 'Unidades o metros de esa línea' },
+          unidad: { type: 'STRING', description: 'ud, m, kg, h, pack… lo que ponga o lo más razonable' },
+          precioUnitario: { type: 'NUMBER', description: 'Precio por unidad SIN IVA, en euros' },
+        },
+        required: ['descripcion'],
+      },
+    },
   },
   required: ['proveedor', 'fecha', 'baseImponible', 'ivaPorcentaje', 'total', 'confianza'],
 };
@@ -63,6 +87,7 @@ Reglas:
 - El proveedor es quien EMITE el documento, no quien paga.
 - El CIF sin espacios ni guiones, en mayúsculas.
 - Elige la categoría que mejor encaje de esta lista: ${CATEGORIAS.join(', ')}.
+- Devuelve también el DESGLOSE de líneas si el documento lo tiene: descripción, cantidad, unidad y precio por unidad sin IVA. Si solo hay un total sin desglose, deja las líneas vacías.
 - Si algo no se lee, déjalo vacío y explícalo en observaciones. No inventes datos.`;
 
 const b64DeDataUrl = (dataUrl: string) => dataUrl.substring(dataUrl.indexOf(',') + 1);
@@ -187,6 +212,15 @@ function normalizar(d: DatosTicket): DatosTicket {
     esTicketSinFactura: !!d.esTicketSinFactura,
     confianza: d.confianza === 'alta' || d.confianza === 'media' || d.confianza === 'baja' ? d.confianza : 'media',
     observaciones: (d.observaciones || '').trim(),
+    lineas: (d.lineas || [])
+      .filter((l) => l && String(l.descripcion || '').trim().length > 2)
+      .map((l) => ({
+        descripcion: String(l.descripcion).trim().substring(0, 120),
+        cantidad: num(l.cantidad),
+        unidad: (l.unidad || '').trim() || undefined,
+        precioUnitario: num(l.precioUnitario),
+      }))
+      .filter((l) => l.precioUnitario !== undefined && l.precioUnitario > 0),
   };
 }
 

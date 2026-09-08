@@ -200,7 +200,7 @@ export const VoiceAIBudgetAssistant: React.FC<VoiceAIBudgetAssistantProps> = ({
           precioUnitario: item.precioUnitario,
           ivaPorcentaje: item.ivaPorcentaje,
           total: item.precioUnitario,
-          costeInternoTotal: item.costeInternoTotal || item.precioUnitario * 0.65,
+          costeInternoTotal: item.precioCompra ?? item.costeInternoTotal ?? item.precioUnitario * 0.65,
           margenPorcentaje: item.margenPorcentaje || 35,
         });
       } else {
@@ -222,7 +222,7 @@ export const VoiceAIBudgetAssistant: React.FC<VoiceAIBudgetAssistantProps> = ({
           precioUnitario: item.precioUnitario,
           ivaPorcentaje: item.ivaPorcentaje,
           total: item.precioUnitario,
-          costeInternoTotal: item.costeInternoTotal || item.precioUnitario * 0.65,
+          costeInternoTotal: item.precioCompra ?? item.costeInternoTotal ?? item.precioUnitario * 0.65,
           margenPorcentaje: item.margenPorcentaje || 35,
         });
       }

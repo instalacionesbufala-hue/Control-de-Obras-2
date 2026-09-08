@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FileCheck2, Plus, Search, Calendar, FileText, CheckCircle2, Trash2, Clock, User, MapPin, X, Upload, HardHat, XCircle, Sparkles, Check, ShieldCheck, Send, Phone, Mail, Eye, CalendarDays, Calculator, Lock, PenTool, PackagePlus, Copy, Link as LinkIcon, AlertCircle, EyeOff, Edit3, Image as ImageIcon, Info } from 'lucide-react';
-import { Project, Client, ProjectDocument, ProjectPhoto, ProjectLog, PresupuestoPartida, CatalogCategory, CatalogItem, MaterialCostComponent, CalendarInstallation, CompanySettings, Kit, FirmaCliente, HuecoPropuesto, Invoice, MOTIVOS_SIN_IMPUESTOS } from '../types';
+import { Project, Client, ProjectDocument, ProjectPhoto, ProjectLog, PresupuestoPartida, CatalogCategory, CatalogItem, MaterialCostComponent, CalendarInstallation, CompanySettings, Kit, FirmaCliente, HuecoPropuesto, Invoice, ConsumoObra, MOTIVOS_SIN_IMPUESTOS } from '../types';
 import { formatCurrency, formatDate, uid, telefonoWhatsApp, redondear2 } from '../utils/formatters';
 import { PeriodFilter } from './PeriodFilter';
 import { PeriodoFiltro, periodoActual, coincidePeriodo, aniosDisponibles, hoyISO, addDays, etiquetaPeriodo, fechaES } from '../utils/dates';
@@ -10,6 +10,8 @@ import { huecosLibres, textoHueco } from '../lib/agenda';
 import { construirPropuesta, publicarPropuesta, generarToken, enlacePropuesta } from '../lib/propuestas';
 import { leerCodigoAceptacion } from '../utils/acceptanceCrypto';
 import { firebaseDisponible } from '../lib/firebase';
+import { CierreObraMovil } from './CierreObraMovil';
+import { ventaConMargen, costeDe } from '../lib/catalogo';
 
 interface Props {
   projects: Project[];
@@ -39,12 +41,15 @@ interface Props {
   onAddLog: (id: string, texto: string, tipo: ProjectLog['tipo']) => void;
   onAddDocument: (id: string, doc: Omit<ProjectDocument, 'id'>) => void;
   onAddPhoto: (id: string, photo: Omit<ProjectPhoto, 'id'>) => void;
+  onGuardarConsumo: (projectId: string, consumo: ConsumoObra[], cerrado: boolean) => void;
   onOpenNewInvoiceForProject: (p: Project) => void;
   onOpenNewExpenseForProject: (p: Project) => void;
   onAviso?: (texto: string, tipo?: 'ok' | 'error' | 'info') => void;
 }
 
 const LIMITE_ADJUNTO = 400 * 1024;
+// Márgenes rápidos que se ofrecen en cada partida del presupuesto
+const MARGENES = [30, 40, 50, 60, 80, 100];
 const ES_OBRA = (e: Project['estado']) => ['Aceptado', 'En ejecución', 'En legalización CIE', 'Finalizada', 'Facturada', 'Pausada'].includes(e);
 
 // Ciclo de vida en colores: gris borrador · azul enviado · ámbar en ejecución · índigo terminada
@@ -68,15 +73,16 @@ const recalcPartida = (p: PresupuestoPartida): PresupuestoPartida => {
 };
 
 export const ProjectsView: React.FC<Props> = (props) => {
-  const { projects, clients, selectedProjectId, companySettings, catalogCategories, catalogItems, kits, calendarEvents, invoices, firebaseUid, siguienteCodigo, modo, abrirCitaDe, onCitaAbierta, onSelectProject, onCreateProject, onUpdateProject, onUpdateProjectStatus, onAcceptBudgetAndConvertToObra, onConfirmarCita, onDeleteProject, onAddLog, onAddDocument, onAddPhoto, onOpenNewInvoiceForProject, onOpenNewExpenseForProject, onAviso } = props;
+  const { projects, clients, selectedProjectId, companySettings, catalogCategories, catalogItems, kits, calendarEvents, invoices, firebaseUid, siguienteCodigo, modo, abrirCitaDe, onCitaAbierta, onSelectProject, onCreateProject, onUpdateProject, onUpdateProjectStatus, onAcceptBudgetAndConvertToObra, onConfirmarCita, onDeleteProject, onAddLog, onAddDocument, onAddPhoto, onGuardarConsumo, onOpenNewInvoiceForProject, onOpenNewExpenseForProject, onAviso } = props;
 
   const [periodo, setPeriodo] = useState<PeriodoFiltro>(periodoActual());
   const [busqueda, setBusqueda] = useState('');
   const esPresupuestos = modo === 'presupuestos';
+  const margenObjetivo = companySettings.margenObjetivo ?? 40;
   type SubFiltro = 'activos' | 'aceptados' | 'rechazados' | 'todos' | 'curso' | 'facturadas' | 'todas';
   const [sub, setSub] = useState<SubFiltro>(esPresupuestos ? 'activos' : 'curso');
   useEffect(() => { setSub(esPresupuestos ? 'activos' : 'curso'); }, [esPresupuestos]);
-  const [tab, setTab] = useState<'resumen' | 'partidas' | 'documentos' | 'fotos' | 'bitacora'>('resumen');
+  const [tab, setTab] = useState<'resumen' | 'partidas' | 'cierre' | 'documentos' | 'fotos' | 'bitacora'>('resumen');
   const [showCreate, setShowCreate] = useState(false);
   const [editandoPartidas, setEditandoPartidas] = useState(false);
   const [preview, setPreview] = useState<Project | null>(null);
@@ -210,7 +216,13 @@ export const ProjectsView: React.FC<Props> = (props) => {
 
   const addCatalogo = (item: CatalogItem) => {
     const cat = catalogCategories.find((c) => c.id === item.categoriaId);
-    setPartidas((prev) => [...prev, recalcPartida({ id: uid('par'), categoria: cat?.nombre || item.categoriaNombre, concepto: item.concepto, descripcion: item.descripcionDetallada, cantidad: 1, unidad: item.unidad, precioUnitario: item.precioUnitario, ivaPorcentaje: item.ivaPorcentaje || 21, total: 0, materiales: (item.materiales || []).map((m) => ({ ...m, id: uid('m') })) })]);
+    // Un material suelto entra como partida con su propio coste de compra, para que la
+    // línea tenga margen real y funcione el selector de margen.
+    const coste = costeDe(item);
+    const escandallo = (item.materiales || []).length
+      ? (item.materiales || []).map((m) => ({ ...m, id: uid('m') }))
+      : [{ id: uid('m'), nombre: item.concepto, cantidad: 1, unidad: item.unidad, costeUnitario: coste, totalCoste: coste, proveedor: item.proveedorHabitual, visibleCliente: false }];
+    setPartidas((prev) => [...prev, recalcPartida({ id: uid('par'), categoria: cat?.nombre || item.categoriaNombre, concepto: item.concepto, descripcion: item.descripcionDetallada, cantidad: 1, unidad: item.unidad, precioUnitario: item.precioUnitario, ivaPorcentaje: item.ivaPorcentaje || 21, total: 0, materiales: escandallo })]);
   };
   const addKit = (kit: Kit) => {
     setPartidas((prev) => [...prev, recalcPartida({ id: uid('par'), categoria: kit.categoria, concepto: kit.nombre, descripcion: kit.descripcion, cantidad: 1, unidad: 'ud', precioUnitario: kit.precioVentaTotal, ivaPorcentaje: 21, total: 0, kitId: kit.id, materiales: kit.partidas.map((k) => ({ id: uid('m'), nombre: k.concepto, cantidad: k.cantidad, unidad: k.unidad, costeUnitario: k.precioCoste, totalCoste: redondear2(k.cantidad * k.precioCoste), proveedor: k.proveedor, visibleCliente: false })) })]);
@@ -484,7 +496,7 @@ export const ProjectsView: React.FC<Props> = (props) => {
 
                 {/* TABS */}
                 <div className="flex gap-1.5 border-b border-slate-100 pb-2 overflow-x-auto">
-                  {([['resumen', 'Resumen y margen'], ['partidas', `Partidas (${p.partidas?.length || 0})`], ['documentos', `Documentos (${p.documentos.length})`], ['fotos', `Fotos (${p.fotos.length})`], ['bitacora', `Bitácora (${p.bitacora.length})`]] as const).map(([id, l]) => <button key={id} onClick={() => setTab(id)} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer ${tab === id ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>{l}</button>)}
+                  {([['resumen', 'Resumen y margen'], ['partidas', `Partidas (${p.partidas?.length || 0})`], ...(ES_OBRA(p.estado) ? [['cierre', p.consumoCerrado ? 'Material real ✓' : 'Material real'] as const] : []), ['documentos', `Documentos (${p.documentos.length})`], ['fotos', `Fotos (${p.fotos.length})`], ['bitacora', `Bitácora (${p.bitacora.length})`]] as const).map(([id, l]) => <button key={id} onClick={() => setTab(id)} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer ${tab === id ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>{l}</button>)}
                 </div>
 
                 {tab === 'resumen' && (
@@ -554,6 +566,10 @@ export const ProjectsView: React.FC<Props> = (props) => {
                   </div>
                 )}
 
+                {tab === 'cierre' && (
+                  <CierreObraMovil key={p.id} project={p} catalogItems={catalogItems} limiteFoto={LIMITE_ADJUNTO} hayDrive={!!firebaseUid} onGuardarConsumo={onGuardarConsumo} onAddPhoto={onAddPhoto} onAviso={onAviso} />
+                )}
+
                 {tab === 'fotos' && (
                   <div className="space-y-3">
                     <div className="flex justify-between items-center"><h4 className="font-bold text-xs uppercase text-slate-400">Fotos de la obra</h4><input type="file" ref={fotoRef} className="hidden" accept="image/*" onChange={subirFoto} /><button onClick={() => fotoRef.current?.click()} className="px-3 py-1.5 bg-blue-600 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><ImageIcon size={12} /> Subir foto</button></div>
@@ -611,6 +627,15 @@ export const ProjectsView: React.FC<Props> = (props) => {
                           <div className="flex items-center gap-1"><label className="text-[10px] text-slate-400">Cant.</label><input type="number" min="0.01" step="any" value={par.cantidad} onChange={(e) => updPartida(par.id, { cantidad: Number(e.target.value) })} className="w-16 border border-slate-200 bg-white rounded-xl px-2 py-1.5 text-center font-bold" /><input value={par.unidad} onChange={(e) => updPartida(par.id, { unidad: e.target.value })} className="w-10 border border-slate-200 bg-white rounded-xl px-1 py-1.5 text-center text-[10px]" /></div>
                           <div className="flex items-center gap-1"><label className="text-[10px] text-slate-400">Precio</label><input type="number" step="0.01" value={par.precioUnitario} onChange={(e) => updPartida(par.id, { precioUnitario: Number(e.target.value) })} className="w-24 border border-slate-200 bg-white rounded-xl px-2 py-1.5 text-right font-black" /><span className="text-[11px] text-slate-400">€</span></div>
                           <select value={par.ivaPorcentaje} onChange={(e) => updPartida(par.id, { ivaPorcentaje: Number(e.target.value) })} className="border border-slate-200 bg-white rounded-xl px-1 py-1.5 text-[11px]"><option value={21}>21 %</option><option value={10}>10 %</option><option value={4}>4 %</option><option value={0}>0 %</option></select>
+                          {(par.costeInternoTotal || 0) > 0 && (
+                            <div className="flex items-center gap-1" title="Fija el precio aplicando este margen sobre el coste interno. Puedes seguir escribiendo el precio a mano.">
+                              <label className="text-[10px] text-slate-400">Margen</label>
+                              <select value={MARGENES.includes(Math.round(par.margenPorcentaje || 0)) ? Math.round(par.margenPorcentaje || 0) : ''} onChange={(e) => { const m = Number(e.target.value); if (m) updPartida(par.id, { precioUnitario: ventaConMargen(par.costeInternoTotal || 0, m) }); }} className="border border-slate-200 bg-white rounded-xl px-1 py-1.5 text-[11px] cursor-pointer">
+                                <option value="">{Math.round(par.margenPorcentaje || 0)} % ·</option>
+                                {MARGENES.map((m) => <option key={m} value={m}>{m} %{m === margenObjetivo ? ' (objetivo)' : ''}</option>)}
+                              </select>
+                            </div>
+                          )}
                           <div className="text-right pl-2 min-w-[80px]"><span className="text-[10px] text-slate-400 block leading-none">Base</span><span className="font-black text-blue-700">{formatCurrency(par.cantidad * par.precioUnitario)}</span></div>
                           <button type="button" onClick={() => setExpandidas((x) => ({ ...x, [par.id]: !x[par.id] }))} className={`px-2.5 py-1.5 rounded-xl font-bold flex items-center gap-1 cursor-pointer ${exp ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-800 border border-amber-200'}`}><Calculator size={13} /> Escandallo</button>
                           <button type="button" onClick={() => setPartidas((prev) => prev.filter((x) => x.id !== par.id))} className="p-1.5 text-slate-400 hover:text-rose-600 cursor-pointer"><Trash2 size={15} /></button>

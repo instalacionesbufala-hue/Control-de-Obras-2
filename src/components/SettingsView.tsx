@@ -1,11 +1,11 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Settings, ShieldCheck, Building2, CheckCircle2, Save, Image, LayoutTemplate, Upload, Trash2, Plus, RefreshCw, AlertTriangle, Cloud, Link as LinkIcon, X, UserCheck, HardHat, Download, Database, Hash, FileText, CalendarDays, Info, Bell, Mail, Sparkles, Eye, EyeOff, Copy, Check } from 'lucide-react';
 import { probarClaveGemini, ModeloGemini } from '../lib/gemini';
 import { SCRIPT_AVISO_ACEPTACION, PASOS_SCRIPT } from '../data/appsScript';
-import { CompanySettings, AppState } from '../types';
+import { CompanySettings, AppState, DisponibilidadTecnico } from '../types';
 import { DEFAULT_TEMPLATES } from '../data/plantillas';
 import { loginWithGoogle, logoutGoogleUser, guardarCopiaEnNube, cargarUltimaCopiaNube, tamanoDocumentoKB, LIMITE_FIRESTORE_KB, mensajeErrorAuth } from '../lib/cloudSync';
-import { exportarCopia, importarCopia, leerCopiaAnterior, tamanoEstadoKB } from '../lib/storage';
+import { exportarCopia, importarCopia, leerCopiaAnterior, tamanoEstadoKB, anotarCopiaLocal, diasSinCopiaLocal } from '../lib/storage';
 import { firebaseDisponible, configPendiente, claveMalCopiada, proyectoFirebase } from '../lib/firebase';
 import { pedirPermisoGoogle, tieneToken, SCOPE_CALENDAR, SCOPE_GMAIL } from '../lib/googleToken';
 import { TemplatesSettings } from './TemplatesSettings';
@@ -27,8 +27,25 @@ interface Props {
 }
 
 export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings, onDeleteExamples, onCargarEjemplos, hayDemo, estadoCompleto, onRestaurarEstado, firebaseUser, estadoNube, errorNube, onAviso }) => {
-  const [f, setF] = useState<CompanySettings>({ ...companySettings, plantillasPersonalizadas: companySettings.plantillasPersonalizadas?.length ? companySettings.plantillasPersonalizadas : DEFAULT_TEMPLATES });
+  const conPlantillas = (s: CompanySettings): CompanySettings => ({ ...s, plantillasPersonalizadas: s.plantillasPersonalizadas?.length ? s.plantillasPersonalizadas : DEFAULT_TEMPLATES });
+  const [f, setF] = useState<CompanySettings>(conPlantillas(companySettings));
   const [guardado, setGuardado] = useState(false);
+  // ¿hay ediciones sin guardar? Sirve para no pisarlas cuando llegan datos de la nube,
+  // y para no subir un formulario obsoleto encima de lo que ya había en la cuenta.
+  const [sinGuardar, setSinGuardar] = useState(false);
+  const [llegaronCambios, setLlegaronCambios] = useState(false);
+
+  // La configuración puede cambiar por debajo: al vincular la cuenta de Google, al sincronizar con
+  // otro dispositivo o al restaurar una copia. Si no estás editando, el formulario se actualiza solo.
+  useEffect(() => {
+    if (sinGuardar) {
+      setLlegaronCambios(true);
+      return;
+    }
+    setF(conPlantillas(companySettings));
+    setLlegaronCambios(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companySettings]);
   const [nuevoTecnico, setNuevoTecnico] = useState('');
   const [permisoNotif, setPermisoNotif] = useState<'default' | 'granted' | 'denied' | 'no'>(typeof Notification === 'undefined' ? 'no' : (Notification.permission as any));
   const [copiadoScript, setCopiadoScript] = useState(false);
@@ -67,13 +84,36 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
   const copiaRef = useRef<HTMLInputElement>(null);
 
   const autonomo = f.tipoEntidad === 'autonomo';
-  const set = <K extends keyof CompanySettings>(k: K, v: CompanySettings[K]) => setF((p) => ({ ...p, [k]: v }));
+  const set = <K extends keyof CompanySettings>(k: K, v: CompanySettings[K]) => {
+    setSinGuardar(true);
+    setF((p) => ({ ...p, [k]: v }));
+  };
+
+  const disponibilidadDe = (t: string): DisponibilidadTecnico => (f.disponibilidadTecnicos || {})[t] || { manana: true, tarde: true };
+  const anadirTecnico = () => {
+    const n = nuevoTecnico.trim();
+    if (!n) return;
+    if ((f.tecnicos || []).some((x) => x.toLowerCase() === n.toLowerCase())) return onAviso?.(`Ya tienes un técnico llamado ${n}.`, 'error');
+    set('tecnicos', [...(f.tecnicos || []), n]);
+    set('disponibilidadTecnicos', { ...(f.disponibilidadTecnicos || {}), [n]: { manana: true, tarde: true } });
+    setNuevoTecnico('');
+  };
 
   const guardar = (e?: React.FormEvent) => {
     e?.preventDefault();
     onSaveSettings(f);
+    setSinGuardar(false);
+    setLlegaronCambios(false);
     setGuardado(true);
     setTimeout(() => setGuardado(false), 2500);
+  };
+
+  // Descarta lo editado y recoge lo que haya llegado de la nube
+  const recogerCambios = () => {
+    setF(conPlantillas(companySettings));
+    setSinGuardar(false);
+    setLlegaronCambios(false);
+    onAviso?.('Formulario actualizado con los datos de la cuenta.', 'ok');
   };
 
   const subirLogo = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -140,6 +180,7 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
 
   const copiaLocal = () => {
     const nombre = exportarCopia(estadoCompleto);
+    anotarCopiaLocal();
     const nuevo = { ...f, copias: { ...(f.copias || {}), ultimaLocal: new Date().toISOString() } };
     setF(nuevo);
     onSaveSettings(nuevo);
@@ -203,6 +244,14 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
 
       <form onSubmit={guardar} className="space-y-6">
         {/* 1. ENTIDAD Y DATOS FISCALES */}
+        {llegaronCambios && (
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 flex flex-col sm:flex-row sm:items-center gap-3">
+            <AlertTriangle size={18} className="shrink-0" />
+            <span className="flex-1">Han llegado datos de configuración de tu cuenta mientras editabas esta pantalla. Si guardas ahora, se conservará lo que ves aquí. Si prefieres los de la cuenta, recógelos antes de guardar.</span>
+            <button type="button" onClick={recogerCambios} className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold cursor-pointer shrink-0">Recoger los datos de la cuenta</button>
+          </div>
+        )}
+
         <Seccion icono={<Building2 size={22} />} color="blue" titulo="Tu empresa o tu actividad como autónomo" sub="Estos datos se imprimen en presupuestos y facturas y deciden qué modelos de Hacienda te corresponden">
           <div className="grid grid-cols-2 gap-2 mb-4">
             <button type="button" onClick={() => set('tipoEntidad', 'empresa')} className={`p-3.5 rounded-2xl border-2 text-left cursor-pointer ${!autonomo ? 'border-blue-600 bg-blue-50/50' : 'border-slate-200 hover:border-slate-300'}`}><div className="flex items-center gap-2 font-black text-slate-900 text-sm"><Building2 size={16} className="text-blue-600" /> Empresa (S.L., S.L.U., S.A.)</div><p className="text-[11px] text-slate-500 mt-1">Impuesto sobre Sociedades (200/202), IVA 303, retenciones 111/115 si aplican.</p></button>
@@ -245,6 +294,10 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
 
         {/* 3. NUMERACIÓN Y DOCUMENTOS */}
         <Seccion icono={<Hash size={22} />} color="indigo" titulo="Numeración y textos de los documentos" sub="Escribe {AAAA} donde quieras que aparezca el año. Las facturas deben ser correlativas dentro de cada serie.">
+          <div className="mb-4 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col sm:flex-row sm:items-center gap-3 text-xs">
+            <div className="flex-1"><p className="font-bold text-slate-800">Margen objetivo</p><p className="text-[11px] text-slate-500">Se usa para sugerir el precio de venta de materiales, kits y partidas. Siempre puedes escribir el precio a mano.</p></div>
+            <div className="flex items-center gap-2 shrink-0"><input type="number" min="0" max="500" value={f.margenObjetivo ?? 40} onChange={(e) => set('margenObjetivo', Number(e.target.value))} className="w-24 border border-slate-200 rounded-xl px-3 py-2 font-black text-right" /><span className="font-bold text-slate-600">% sobre el coste</span></div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
             {([['prefijoPresupuestos', 'siguienteNumeroPresupuesto', 'Presupuestos'], ['prefijoObras', 'siguienteNumeroObra', 'Obras'], ['prefijoFacturas', 'siguienteNumeroFactura', 'Facturas'], ['prefijoRectificativas', 'siguienteNumeroRectificativa', 'Rectificativas']] as Array<[keyof CompanySettings, keyof CompanySettings, string]>).map(([pk, nk, label]) => (
               <div key={label} className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
@@ -261,44 +314,84 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
         </Seccion>
 
         {/* 4. TÉCNICOS Y FRANJAS */}
-        <Seccion icono={<HardHat size={22} />} color="amber" titulo="Técnicos y franjas horarias" sub="Para asignar citas y calcular los huecos libres que se proponen al cliente. Puedes quitar una franja para todos o solo para un técnico.">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div className="space-y-2">
-              <p className="font-bold text-slate-700">Técnicos y franjas que cubre cada uno</p>
-              <div className="space-y-1.5">
-                {(f.tecnicos || []).map((t) => {
-                  const d = (f.disponibilidadTecnicos || {})[t] || { manana: true, tarde: true };
-                  const cambiar = (k: 'manana' | 'tarde') => set('disponibilidadTecnicos', { ...(f.disponibilidadTecnicos || {}), [t]: { ...d, [k]: !d[k] } });
-                  return (
-                    <div key={t} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-                      <span className="font-bold text-slate-800 flex-1 truncate">{t}</span>
-                      {(['manana', 'tarde'] as const).map((k) => (
-                        <label key={k} className={`flex items-center gap-1 px-2 py-1 rounded-lg cursor-pointer border ${d[k] ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-white border-slate-200 text-slate-400 line-through'} ${f.franjasActivas?.[k] === false ? 'opacity-40' : ''}`} title={f.franjasActivas?.[k] === false ? 'Franja desactivada para toda la empresa' : ''}>
-                          <input type="checkbox" checked={d[k]} onChange={() => cambiar(k)} className="accent-emerald-600" /> {k === 'manana' ? 'Mañana' : 'Tarde'}
-                        </label>
-                      ))}
-                      <button type="button" onClick={() => { const disp = { ...(f.disponibilidadTecnicos || {}) }; delete disp[t]; set('disponibilidadTecnicos', disp); set('tecnicos', f.tecnicos.filter((x) => x !== t)); }} className="text-slate-400 hover:text-rose-600 cursor-pointer" title="Quitar técnico"><X size={14} /></button>
-                    </div>
-                  );
-                })}
-                {(f.tecnicos || []).length === 0 && <span className="text-slate-400">Sin técnicos: se usará tu nombre y se ofrecerán las franjas activas.</span>}
+        <Seccion icono={<HardHat size={22} />} color="amber" titulo="Técnicos y franjas horarias" sub="Para asignar citas y calcular los huecos libres que se proponen al cliente. Cada técnico puede cubrir solo una franja y tener su propio horario.">
+          <div className="space-y-4 text-xs">
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <p className="font-bold text-slate-800">Horario general de la empresa</p>
+                <span className="text-[10px] text-slate-400">Es el que se aplica a quien no tenga horario propio</span>
               </div>
-              <div className="flex gap-2"><input value={nuevoTecnico} onChange={(e) => setNuevoTecnico(e.target.value)} placeholder="Nombre del técnico" className="flex-1 border border-slate-200 rounded-xl px-3 py-2" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (nuevoTecnico.trim()) { set('tecnicos', [...(f.tecnicos || []), nuevoTecnico.trim()]); setNuevoTecnico(''); } } }} /><button type="button" onClick={() => { if (nuevoTecnico.trim()) { set('tecnicos', [...(f.tecnicos || []), nuevoTecnico.trim()]); setNuevoTecnico(''); } }} className="px-3 py-2 bg-slate-900 text-white rounded-xl font-bold cursor-pointer"><Plus size={14} /></button></div>
-            </div>
-            <div className="space-y-2">
-              <p className="font-bold text-slate-700">Franjas para las citas</p>
               {(['manana', 'tarde'] as const).map((k) => {
                 const activa = f.franjasActivas?.[k] !== false;
                 return (
                   <div key={k} className={`flex items-center gap-2 flex-wrap ${activa ? '' : 'opacity-60'}`}>
                     <label className="flex items-center gap-1.5 w-24 font-bold text-slate-600 cursor-pointer"><input type="checkbox" checked={activa} onChange={() => set('franjasActivas', { manana: true, tarde: true, ...(f.franjasActivas || {}), [k]: !activa })} className="accent-emerald-600" /> {k === 'manana' ? 'Mañana' : 'Tarde'}</label>
                     <input type="time" disabled={!activa} value={f.franjas[k].inicio} onChange={(e) => set('franjas', { ...f.franjas, [k]: { ...f.franjas[k], inicio: e.target.value } })} className="border border-slate-200 rounded-xl px-2 py-1.5" /><span>a</span><input type="time" disabled={!activa} value={f.franjas[k].fin} onChange={(e) => set('franjas', { ...f.franjas, [k]: { ...f.franjas[k], fin: e.target.value } })} className="border border-slate-200 rounded-xl px-2 py-1.5" />
-                    {!activa && <span className="text-[10px] text-rose-600 font-bold">No se ofrece</span>}
+                    {!activa && <span className="text-[10px] text-rose-600 font-bold">No se ofrece a los clientes</span>}
                   </div>
                 );
               })}
-              <p className="text-[10px] text-slate-400">Los huecos libres se calculan de lunes a viernes con las franjas activas. Una franja se ofrece mientras quede algún técnico que la cubra sin cita.</p>
             </div>
+
+            <div className="space-y-2">
+              <p className="font-bold text-slate-800">Técnicos</p>
+              {(f.tecnicos || []).map((t) => {
+                const d = disponibilidadDe(t);
+                const cambiar = (k: 'manana' | 'tarde', campos: Partial<DisponibilidadTecnico>) => set('disponibilidadTecnicos', { ...(f.disponibilidadTecnicos || {}), [t]: { ...d, ...campos } });
+                const setHoras = (k: 'manana' | 'tarde', campo: 'inicio' | 'fin', v: string) => {
+                  const base = { ...(d.horas || {}) };
+                  base[k] = { ...(base[k] || f.franjas[k]), [campo]: v };
+                  cambiar(k, { horas: base });
+                };
+                const propio = (k: 'manana' | 'tarde') => !!d.horas?.[k];
+                return (
+                  <div key={t} className="p-3.5 bg-white rounded-2xl border border-slate-200 space-y-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="w-8 h-8 rounded-xl bg-amber-50 text-amber-700 font-black flex items-center justify-center shrink-0">{t.trim().charAt(0).toUpperCase()}</span>
+                      <span className="font-black text-slate-900 flex-1 truncate">{t}</span>
+                      <button type="button" onClick={() => { const disp = { ...(f.disponibilidadTecnicos || {}) }; delete disp[t]; set('disponibilidadTecnicos', disp); set('tecnicos', f.tecnicos.filter((x) => x !== t)); }} className="text-slate-400 hover:text-rose-600 cursor-pointer shrink-0" title="Quitar este técnico"><X size={15} /></button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {(['manana', 'tarde'] as const).map((k) => {
+                        const empresaActiva = f.franjasActivas?.[k] !== false;
+                        const horas = d.horas?.[k] || f.franjas[k];
+                        return (
+                          <div key={k} className={`p-2.5 rounded-xl border ${d[k] && empresaActiva ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-200 bg-slate-50'} ${empresaActiva ? '' : 'opacity-50'}`}>
+                            <label className="flex items-center gap-1.5 font-bold text-slate-700 cursor-pointer">
+                              <input type="checkbox" checked={d[k] && empresaActiva} disabled={!empresaActiva} onChange={() => cambiar(k, { [k]: !d[k] } as any)} className="accent-emerald-600" />
+                              {k === 'manana' ? 'Mañana' : 'Tarde'}
+                              {!empresaActiva && <span className="text-[10px] font-normal text-slate-400">(desactivada para todos)</span>}
+                            </label>
+                            {d[k] && empresaActiva && (
+                              <div className="mt-1.5 space-y-1.5">
+                                <div className="flex items-center gap-1.5">
+                                  <input type="time" value={horas.inicio} onChange={(e) => setHoras(k, 'inicio', e.target.value)} className="border border-slate-200 rounded-lg px-1.5 py-1 bg-white" />
+                                  <span className="text-slate-400">a</span>
+                                  <input type="time" value={horas.fin} onChange={(e) => setHoras(k, 'fin', e.target.value)} className="border border-slate-200 rounded-lg px-1.5 py-1 bg-white" />
+                                </div>
+                                <p className="text-[10px] text-slate-400">{propio(k) ? <>Horario propio. <button type="button" onClick={() => { const base = { ...(d.horas || {}) }; delete base[k]; cambiar(k, { horas: Object.keys(base).length ? base : undefined }); }} className="text-blue-600 font-bold hover:underline cursor-pointer">Usar el general</button></> : 'Sigue el horario general; cámbialo aquí si este técnico hace otro.'}</p>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+              {(f.tecnicos || []).length === 0 && <p className="p-3 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-slate-500">Sin técnicos: se usará tu nombre con el horario general.</p>}
+            </div>
+
+            <div className="p-3.5 bg-slate-900 rounded-2xl space-y-2">
+              <p className="font-bold text-white">Añadir un técnico</p>
+              <div className="flex gap-2">
+                <input value={nuevoTecnico} onChange={(e) => setNuevoTecnico(e.target.value)} placeholder="Nombre del técnico" className="flex-1 border border-slate-700 bg-slate-800 text-white rounded-xl px-3 py-2 placeholder:text-slate-500" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); anadirTecnico(); } }} />
+                <button type="button" onClick={anadirTecnico} className="px-4 py-2 bg-white text-slate-900 rounded-xl font-black cursor-pointer flex items-center gap-1.5"><Plus size={14} /> Añadir</button>
+              </div>
+              <p className="text-[11px] text-slate-400">Entra cubriendo las dos franjas con el horario general. Después ajustas en su tarjeta qué franjas hace y a qué horas.</p>
+            </div>
+
+            <p className="text-[10px] text-slate-400">Los huecos que se proponen al cliente se calculan de lunes a viernes con las franjas activas. Una franja se ofrece mientras quede algún técnico que la cubra y no tenga ya cita. Al confirmar la cita con un técnico asignado, se usan las horas de ese técnico.</p>
           </div>
         </Seccion>
 
@@ -387,6 +480,19 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
         </Seccion>
 
         {/* 7. COPIAS */}
+        {(() => {
+          const dias = diasSinCopiaLocal(f);
+          const cada = f.copias?.recordarCadaDias ?? 7;
+          if (dias !== null && dias < cada) return null;
+          return (
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 flex flex-col sm:flex-row sm:items-center gap-3">
+              <AlertTriangle size={18} className="shrink-0" />
+              <span className="flex-1">{dias === null ? 'Todavía no has descargado ninguna copia a tu ordenador. La nube de Google es cómoda, pero si pierdes la cuenta lo pierdes todo: guarda un archivo tuyo.' : `Han pasado ${dias} días desde tu última copia local. Descarga una y guárdala en un disco aparte.`}</span>
+              <button type="button" onClick={copiaLocal} className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold cursor-pointer shrink-0 flex items-center gap-1.5"><Download size={14} /> Descargar copia ahora</button>
+            </div>
+          );
+        })()}
+
         <Seccion icono={<Database size={22} />} color="emerald" titulo="Copias de seguridad" sub={`Todo lo que hay en la app ocupa ${kb} KB. Guarda una copia local (archivo) con regularidad, y otra en la nube si tienes Google vinculado.`}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">

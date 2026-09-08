@@ -2,8 +2,9 @@
 // y utilidades de fusión con la nube.
 import { AppState, CompanySettings, DocumentTemplate } from '../types';
 import { DEFAULT_TEMPLATES } from '../data/plantillas';
+import { separarCatalogo } from './catalogo';
 
-export const STATE_VERSION = 3;
+export const STATE_VERSION = 4;
 export const STORAGE_KEY = 'obracontrol-estado-v1';
 export const BACKUP_KEY = 'obracontrol-copia-anterior';
 export const DEVICE_KEY = 'obracontrol-dispositivo';
@@ -61,6 +62,7 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
   diasVencimientoFactura: 30,
   tecnicos: [],
   franjas: { manana: { inicio: '08:30', fin: '14:00' }, tarde: { inicio: '15:30', fin: '19:30' } },
+  margenObjetivo: 40,
   franjasActivas: { manana: true, tarde: true },
   disponibilidadTecnicos: {},
   geminiApiKey: '',
@@ -78,7 +80,7 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
   googleAccountEmail: '',
   googleCalendarId: 'primary',
   bancoConexion: { conectado: false, proveedor: 'manual', entidad: '' },
-  copias: { autoLocal: true },
+  copias: { autoLocal: true, recordarCadaDias: 7 },
 };
 
 // Rellena campos que falten en una configuración antigua
@@ -87,6 +89,7 @@ export function migrarSettings(raw: Partial<CompanySettings> | undefined): Compa
   if (!s.tipoEntidad) s.tipoEntidad = 'empresa';
   if (!Array.isArray(s.tecnicos)) s.tecnicos = [];
   if (!s.franjas) s.franjas = DEFAULT_COMPANY_SETTINGS.franjas;
+  if (typeof s.margenObjetivo !== 'number') s.margenObjetivo = 40;
   if (!s.franjasActivas) s.franjasActivas = { manana: true, tarde: true };
   if (!s.disponibilidadTecnicos) s.disponibilidadTecnicos = {};
   if (Array.isArray(s.plantillasPersonalizadas) && s.plantillasPersonalizadas.length) {
@@ -96,7 +99,8 @@ export function migrarSettings(raw: Partial<CompanySettings> | undefined): Compa
   if (!s.verifactuCertificado) s.verifactuCertificado = DEFAULT_COMPANY_SETTINGS.verifactuCertificado;
   if (!s.bancoConexion) s.bancoConexion = { conectado: false, proveedor: 'manual', entidad: '' };
   if (!(s.bancoConexion as any).proveedor) (s.bancoConexion as any).proveedor = 'manual';
-  if (!s.copias) s.copias = { autoLocal: true };
+  if (!s.copias) s.copias = { autoLocal: true, recordarCadaDias: 7 };
+  if (!s.copias.recordarCadaDias) s.copias.recordarCadaDias = 7;
   if (!s.prefijoPresupuestos) s.prefijoPresupuestos = 'PRE-{AAAA}-';
   if (!s.prefijoObras) s.prefijoObras = 'OB-{AAAA}-';
   if (!s.siguienteNumeroPresupuesto) s.siguienteNumeroPresupuesto = 1;
@@ -162,6 +166,24 @@ export function migrarEstado(raw: any): AppState | null {
   }));
   // Clientes: exigirFirma por defecto true
   st.clients = st.clients.map((c: any) => ({ ...c, exigirFirma: c.exigirFirma !== false, tipoCliente: c.tipoCliente === 'empresa' ? 'pyme' : c.tipoCliente || 'particular' }));
+  // v4: separar materiales de kits. Los "conceptos" con escandallo eran kits disfrazados:
+  // pasan a la lista de kits y sus materiales salen al catálogo como materiales sueltos.
+  if ((raw.version || 0) < 4 && st.catalogItems.some((i: any) => (i.materiales || []).length > 0)) {
+    const r = separarCatalogo(st.catalogItems, st.kits, st.catalogCategories);
+    st.catalogItems = r.materiales;
+    st.kits = r.kits;
+    st.catalogCategories = r.categorias;
+  }
+  st.catalogItems = st.catalogItems.map((i: any) => ({ ...i, precioCompra: i.precioCompra !== undefined ? i.precioCompra : i.costeInternoTotal || 0 }));
+
+  // v4: cobros de la factura. Lo que estaba marcado como pagado pasa a tener un cobro por el total,
+  // para no perder la información al empezar a llevar los cobros uno a uno.
+  st.invoices = st.invoices.map((f: any) => {
+    if (Array.isArray(f.cobros)) return f;
+    const pagada = f.estado === 'Pagada';
+    return { ...f, cobros: pagada ? [{ id: `cob-${f.id}`, fecha: f.fecha, importe: f.total, metodo: f.metodoPago, transaccionId: f.transaccionId, nota: 'Cobro registrado antes de llevar el control por partes' }] : [] };
+  });
+
   return st;
 }
 
@@ -222,6 +244,35 @@ export function tamanoEstadoKB(state: AppState): number {
 }
 
 // Copia de seguridad en archivo JSON
+// Guarda cuándo se hizo la última copia local, para poder recordarlo
+export function anotarCopiaLocal(): string {
+  const hoy = new Date().toISOString().split('T')[0];
+  try {
+    localStorage.setItem('obracontrol-ultima-copia', hoy);
+  } catch {
+    // sin storage: solo queda en la configuración
+  }
+  return hoy;
+}
+
+export function ultimaCopiaLocal(settings?: { copias?: { ultimaLocal?: string } }): string | null {
+  try {
+    const local = localStorage.getItem('obracontrol-ultima-copia');
+    const enConfig = settings?.copias?.ultimaLocal;
+    if (local && enConfig) return local > enConfig ? local : enConfig;
+    return local || enConfig || null;
+  } catch {
+    return settings?.copias?.ultimaLocal || null;
+  }
+}
+
+// Días desde la última copia local. Devuelve null si nunca se ha hecho ninguna.
+export function diasSinCopiaLocal(settings?: { copias?: { ultimaLocal?: string } }): number | null {
+  const u = ultimaCopiaLocal(settings);
+  if (!u) return null;
+  return Math.floor((Date.now() - new Date(u).getTime()) / 86400000);
+}
+
 export function exportarCopia(state: AppState): string {
   const fecha = new Date();
   const p = (n: number) => String(n).padStart(2, '0');

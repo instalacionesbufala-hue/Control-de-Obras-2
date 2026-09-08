@@ -30,10 +30,17 @@ export interface Client {
 
 export interface ProjectPhoto {
   id: string;
-  url: string;
+  url: string; // miniatura pequeña para verla en la app; el original está en Drive
   titulo: string;
   fecha: string;
   tipo: 'antes' | 'durante' | 'despues' | 'detalle';
+  // Archivo original en el Drive del usuario (15 GB gratis). Sin esto, la foto vive
+  // dentro del estado y ocupa del límite de 1 MB del documento de la nube.
+  driveFileId?: string;
+  driveEnlace?: string;
+  nombreArchivo?: string;
+  tamano?: number;
+  esVideo?: boolean;
 }
 
 export interface ProjectDocument {
@@ -44,7 +51,12 @@ export interface ProjectDocument {
   tamano: string;
   estado: 'Aprobado' | 'En trámite' | 'Pendiente' | 'Firmado';
   notas?: string;
-  dataUrl?: string; // contenido del archivo (imagen o PDF pequeño) guardado en el propio estado
+  dataUrl?: string; // solo si no hay Drive: el archivo va dentro del estado y ocupa del límite de 1 MB
+  driveFileId?: string;
+  driveEnlace?: string;
+  tamanoBytes?: number;
+  mime?: string;
+  paraCie?: boolean; // documentación necesaria para el certificado de instalación eléctrica
 }
 
 export interface ProjectLog {
@@ -69,17 +81,24 @@ export interface MaterialCostComponent {
   visibleCliente?: boolean;
 }
 
+// Un material del almacén: algo que se compra. Las agrupaciones de materiales más mano de obra
+// son Kits (ver más abajo); antes ambas cosas vivían aquí mezcladas y se separaron en la v4.
 export interface CatalogItem {
   id: string;
-  concepto: string;
+  concepto: string; // nombre del material
   unidad: string;
-  precioUnitario: number; // PVP base sin IVA
+  precioCompra?: number; // lo que te cuesta a ti
+  precioUnitario: number; // PVP base sin IVA, por si lo vendes suelto
   ivaPorcentaje: number;
   descripcionDetallada?: string;
   categoriaId: string;
   categoriaNombre: string;
   referenciaSku?: string;
   proveedorHabitual?: string;
+  fechaUltimoPrecio?: string; // cuándo se actualizó el precio de compra por última vez
+  origenUltimoPrecio?: string; // de qué factura o proveedor salió
+  esDemo?: boolean;
+  // Restos del modelo antiguo: solo los usa la migración
   materiales?: MaterialCostComponent[];
   costeInternoTotal?: number;
   margenPorcentaje?: number;
@@ -105,6 +124,12 @@ export interface PresupuestoPartida {
   margenPorcentaje?: number;
   kitId?: string; // si la partida viene de un kit
   descripcion?: string; // texto adicional visible para el cliente
+}
+
+export interface DisponibilidadTecnico {
+  manana: boolean;
+  tarde: boolean;
+  horas?: { manana?: { inicio: string; fin: string }; tarde?: { inicio: string; fin: string } };
 }
 
 export type ProjectEstado =
@@ -144,6 +169,51 @@ export interface HuecoPropuesto {
   horaFin: string;
 }
 
+// Una línea de material realmente gastado en la obra. Sale del escandallo del presupuesto
+// con la cantidad prevista ya puesta, para que en obra solo haya que corregir lo que cambió.
+export interface ConsumoObra {
+  id: string;
+  partidaId?: string;
+  partidaConcepto?: string;
+  materialId?: string; // material del catálogo, si lo es
+  nombre: string;
+  unidad: string;
+  cantidadPrevista: number; // 0 si es un imprevisto
+  cantidadReal: number;
+  costeUnitario: number;
+  extra?: boolean; // no estaba presupuestado
+}
+
+// Una línea de material realmente gastado en la obra. Sale del escandallo del presupuesto
+// con la cantidad prevista ya puesta, para que en obra solo haya que corregir lo que cambió.
+export interface ConsumoObra {
+  id: string;
+  partidaId?: string;
+  partidaConcepto?: string;
+  materialId?: string; // material del catálogo, si lo es
+  nombre: string;
+  unidad: string;
+  cantidadPrevista: number; // 0 si es un imprevisto
+  cantidadReal: number;
+  costeUnitario: number;
+  extra?: boolean; // no estaba presupuestado
+}
+
+// Una línea de material realmente gastado en la obra. Sale del escandallo del presupuesto
+// con la cantidad prevista ya puesta, para que en obra solo haya que corregir lo que cambió.
+export interface ConsumoObra {
+  id: string;
+  partidaId?: string;
+  partidaConcepto?: string;
+  materialId?: string; // material del catálogo, si lo es
+  nombre: string;
+  unidad: string;
+  cantidadPrevista: number; // 0 si es un imprevisto
+  cantidadReal: number;
+  costeUnitario: number;
+  extra?: boolean; // no estaba presupuestado
+}
+
 export interface Project {
   id: string;
   codigo: string; // PRE-2026-001 mientras es presupuesto; al aceptarse se guarda también obraCodigo
@@ -176,6 +246,9 @@ export interface Project {
   partidas?: PresupuestoPartida[];
   motivoRechazo?: string;
   plantillaPresupuesto?: string;
+  // Material realmente gastado, para la rentabilidad real de la obra
+  consumoReal?: ConsumoObra[];
+  consumoCerrado?: boolean;
   // Presupuesto presentado sin impuestos (trabajos donde no procede repercutirlos)
   sinImpuestos?: boolean;
   motivoSinImpuestos?: string; // texto que se imprime explicando por qué
@@ -237,6 +310,17 @@ export interface RegistroVerifactu {
   importeRectificacion?: { baseRectificada: number; cuotaRectificada: number };
 }
 
+// Un cobro concreto de una factura. Lo habitual es cobrar en dos veces (50 % y 50 %),
+// así que una factura guarda una lista y su estado sale de sumarlos.
+export interface CobroFactura {
+  id: string;
+  fecha: string;
+  importe: number;
+  metodo?: string;
+  transaccionId?: string; // si el cobro vino de conciliar un movimiento del banco
+  nota?: string;
+}
+
 export interface Invoice {
   id: string;
   numero: string;
@@ -266,8 +350,9 @@ export interface Invoice {
   firmaCliente?: FirmaCliente; // copia de la aceptación del presupuesto
   verifactu: RegistroVerifactu;
   metodoPago: 'Transferencia Bancaria' | 'Pagaré' | 'Efectivo' | 'TPV' | 'Bizum' | 'Domiciliación';
+  cobros?: CobroFactura[]; // de dónde sale que esté cobrada, entera o a medias
   bancoConciliado?: boolean;
-  transaccionId?: string;
+  transaccionId?: string; // primer movimiento conciliado, se conserva por compatibilidad
   esDemo?: boolean;
 }
 
@@ -450,9 +535,11 @@ export interface CompanySettings {
   franjas: { manana: { inicio: string; fin: string }; tarde: { inicio: string; fin: string } };
   // Qué franjas ofrece la empresa (se puede quitar la tarde o la mañana para todos)
   franjasActivas?: { manana: boolean; tarde: boolean };
-  // Qué franjas cubre cada técnico, por nombre. Si falta, cubre las dos.
-  disponibilidadTecnicos?: Record<string, { manana: boolean; tarde: boolean }>;
+  // Qué franjas cubre cada técnico y, si lo necesita, con qué horas propias.
+  // Sin "horas" se usan las generales de la empresa.
+  disponibilidadTecnicos?: Record<string, DisponibilidadTecnico>;
   // Lector de tickets con IA: clave de Gemini del propio usuario (se sincroniza por su nube; nunca va en las copias exportadas)
+  margenObjetivo?: number; // margen por defecto al sugerir precios de venta (%)
   geminiApiKey?: string;
   geminiModelo?: string; // el que se descubrió al probar la clave; si falta, la app lo busca sola
   // Aviso de aceptación por correo con Google Apps Script (URL /exec de la aplicación web del usuario)
@@ -481,12 +568,15 @@ export interface CompanySettings {
     ultimaLocal?: string;
     ultimaNube?: string;
     autoLocal?: boolean;
+    recordarCadaDias?: number; // cada cuántos días recordar hacer copia local
   };
 }
 
+// Una línea dentro de un kit: o un material del catálogo (con itemId), o mano de obra
+// y otros trabajos escritos a mano (sin itemId).
 export interface KitItem {
   id: string;
-  itemId?: string;
+  itemId?: string; // referencia al material del catálogo
   concepto: string;
   cantidad: number;
   unidad: string;
@@ -494,6 +584,8 @@ export interface KitItem {
   precioVenta: number;
   ivaPorcentaje: number;
   proveedor?: string;
+  visibleCliente?: boolean; // si el cliente lo ve en el presupuesto (nombre y cantidad, nunca el coste)
+  tipo?: 'material' | 'mano-de-obra' | 'otro';
 }
 
 export interface Kit {

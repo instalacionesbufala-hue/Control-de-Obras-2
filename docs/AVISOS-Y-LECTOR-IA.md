@@ -71,6 +71,14 @@ Sobre la clave:
 - **El modelo se elige solo.** Google retira y renombra modelos cada pocos meses (verás mensajes del tipo "no longer available to new users"). Al pulsar **Probar**, la app le pregunta a Google qué modelos admite tu clave, se queda con el más rápido y económico que sepa leer imágenes, y lo guarda. Si algún día ese modelo desaparece, la app busca otro sola en la siguiente lectura. En Configuración puedes ver cuál se está usando y cambiarlo por otro de la lista.
 - La foto del ticket se envía a Google para leerla. Si un documento es confidencial, no uses el botón y rellena a mano.
 
+### Poner al día los precios de compra
+
+Si la factura del proveedor trae desglose de líneas, la app las compara con los materiales de tu catálogo por parecido de nombre. Cuando encuentra alguno cuyo precio ha cambiado, aparece un panel morado con la lista: nombre del material, cómo venía escrito en la factura, precio anterior tachado, precio nuevo y el porcentaje de subida o bajada.
+
+- Vienen marcados los de coincidencia clara. Los dudosos se avisan con "parecido dudoso, compruébalo" y hay que marcarlos a mano.
+- Los precios se guardan **al pulsar Guardar gasto**, no antes, y queda anotado de qué factura salieron y en qué fecha.
+- Los kits no cambian aquí. Cuando edites ese material en el catálogo, la app te preguntará a qué kits aplicas el coste nuevo.
+
 ### Consejos para que lea bien
 
 - Foto recta, con luz y el ticket entero. La app la reduce a 1.600 píxeles antes de guardarla.

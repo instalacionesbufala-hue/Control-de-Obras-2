@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
-  LayoutDashboard, FileCheck2, BadgeEuro, Receipt, Users, Wallet,
+  LayoutDashboard, BadgeEuro, Receipt, Users, Wallet,
   BarChart3, Settings, Zap, Boxes, Menu, X, Trash2, Sparkles,
-  CheckCircle2, AlertTriangle, CalendarDays, User as UserIcon, Cloud, RefreshCw, TrendingUp, PackagePlus, HelpCircle, CloudOff, Save, FileText, HardHat,
+  CheckCircle2, AlertTriangle, CalendarDays, User as UserIcon, Cloud, RefreshCw, TrendingUp, HelpCircle, CloudOff, Save, FileText, HardHat,
 } from 'lucide-react';
 
 import {
@@ -11,20 +11,22 @@ import {
 } from './data/initialData';
 
 import {
-  Client, Project, Invoice, Expense, BankTransaction, CalendarInstallation, CompanySettings, ProjectLog, ProjectDocument, ProjectPhoto,
+  Client, Project, Invoice, CobroFactura, ConsumoObra, Expense, BankTransaction, CalendarInstallation, CompanySettings, ProjectLog, ProjectDocument, ProjectPhoto,
   CatalogCategory, CatalogItem, Supplier, Kit, AppState, FirmaCliente, HuecoPropuesto,
 } from './types';
 
 import { auth, onAuthStateChanged, firebaseDisponible } from './lib/firebase';
 import { guardarEstadoEnNube, cargarEstadoDeNube, escucharEstadoNube } from './lib/cloudSync';
-import { cargarLocal, guardarLocal, guardarCopiaAnterior, tieneDatosPropios, DEFAULT_COMPANY_SETTINGS, migrarSettings, STATE_VERSION, deviceId } from './lib/storage';
+import { diasSinCopiaLocal, cargarLocal, guardarLocal, guardarCopiaAnterior, tieneDatosPropios, DEFAULT_COMPANY_SETTINGS, migrarSettings, STATE_VERSION, deviceId } from './lib/storage';
+import { horasDeTecnico } from './lib/agenda';
+import { actualizarCosteEnKits, catalogoDemoSeparado } from './lib/catalogo';
+import { conCobro, sinCobro } from './lib/cobros';
 import { escucharAceptaciones, firmaDesdeAceptacion, cerrarPropuesta, AceptacionPublica } from './lib/propuestas';
 import { numeroDocumento, uid } from './utils/formatters';
 import { hoyISO, ahoraISO } from './utils/dates';
 
 import { DashboardView } from './components/DashboardView';
 import { ProjectsView } from './components/ProjectsView';
-import { CatalogView } from './components/CatalogView';
 import { MaterialsAndKitsView } from './components/MaterialsAndKitsView';
 import { SalesView } from './components/SalesView';
 import { ExpensesView } from './components/ExpensesView';
@@ -67,12 +69,15 @@ function AppPrincipal() {
   const [aviso, setAviso] = useState<{ texto: string; tipo: 'ok' | 'error' | 'info'; accion?: { texto: string; onClick: () => void }; fijo?: boolean } | null>(null);
   // Datos propios a ambos lados al vincular un equipo nuevo: lo elige el usuario, no la app
   const [conflictoInicial, setConflictoInicial] = useState<{ remoto: AppState; resumenNube: string; resumenLocal: string } | null>(null);
+  const [avisoCopiaCerrado, setAvisoCopiaCerrado] = useState(false);
   const [citaPendienteDe, setCitaPendienteDe] = useState<string | null>(null); // abre "Proponer franjas" en Obras
 
   // ---------- Estado principal (se carga de localStorage o de los ejemplos) ----------
   const inicial = useMemo<AppState>(() => {
     const local = cargarLocal();
     if (local) return local;
+    // Los ejemplos vienen con el modelo antiguo: se separan en materiales y kits al cargarlos
+    const demo = catalogoDemoSeparado(INITIAL_CATALOG_ITEMS, INITIAL_KITS, INITIAL_CATALOG_CATEGORIES);
     return {
       version: STATE_VERSION,
       updatedAt: new Date().toISOString(),
@@ -84,10 +89,10 @@ function AppPrincipal() {
       expenses: INITIAL_EXPENSES,
       bankTransactions: INITIAL_BANK_TRANSACTIONS,
       calendarEvents: INITIAL_CALENDAR_EVENTS,
-      catalogCategories: INITIAL_CATALOG_CATEGORIES,
-      catalogItems: INITIAL_CATALOG_ITEMS,
+      catalogCategories: demo.categorias,
+      catalogItems: demo.materiales,
       suppliers: INITIAL_SUPPLIERS,
-      kits: INITIAL_KITS,
+      kits: demo.kits,
       demoCargada: true,
       guiaVista: false,
     };
@@ -305,11 +310,21 @@ function AppPrincipal() {
   const handleClearAllCatalogItems = () => setCatalogItems([]);
   const handleUpdateCatalogItem = (id: string, data: Partial<CatalogItem>) => setCatalogItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...data } : it)));
   const handleDeleteCatalogItem = (id: string) => setCatalogItems((prev) => prev.filter((it) => it.id !== id));
+  // Aplica el nuevo coste de un material a los kits que el usuario haya marcado
+  const handlePropagarCoste = (materialId: string, nuevoCoste: number, idsKits: string[]) => setKits((prev) => actualizarCosteEnKits(materialId, nuevoCoste, prev, idsKits));
+  // Precios de compra puestos al día desde una factura de proveedor leída con la IA
+  const handleActualizarPrecios = (cambios: Array<{ id: string; precioCompra: number; origen: string }>) => {
+    const hoy = hoyISO();
+    setCatalogItems((prev) => prev.map((m) => { const c = cambios.find((x) => x.id === m.id); return c ? { ...m, precioCompra: c.precioCompra, fechaUltimoPrecio: hoy, origenUltimoPrecio: c.origen } : m; }));
+    setAviso({ texto: `Precio de compra actualizado en ${cambios.length} material${cambios.length > 1 ? 'es' : ''}. Al editarlos podrás aplicar el cambio a los kits que los usan.`, tipo: 'ok' });
+  };
   const handleAddCatalogCategory = (data: Omit<CatalogCategory, 'id'>) => setCatalogCategories((prev) => [...prev, { ...data, id: uid('cat') }]);
+  // Disponible para la pantalla de materiales; hoy solo se crean categorías desde el formulario
   const handleUpdateCatalogCategory = (id: string, data: Partial<CatalogCategory>) => {
     setCatalogCategories((prev) => prev.map((c) => (c.id === id ? { ...c, ...data } : c)));
     if (data.nombre) setCatalogItems((prev) => prev.map((it) => (it.categoriaId === id ? { ...it, categoriaNombre: data.nombre! } : it)));
   };
+  // Disponible para la pantalla de materiales; hoy solo se crean categorías desde el formulario
   const handleDeleteCatalogCategory = (id: string) => {
     const restantes = catalogCategories.filter((c) => c.id !== id);
     setCatalogCategories(restantes);
@@ -319,8 +334,9 @@ function AppPrincipal() {
     }
   };
   const handleResetCatalogToDefaults = () => {
-    setCatalogCategories(INITIAL_CATALOG_CATEGORIES);
-    setCatalogItems(INITIAL_CATALOG_ITEMS);
+    const demo = catalogoDemoSeparado(INITIAL_CATALOG_ITEMS, INITIAL_KITS, INITIAL_CATALOG_CATEGORIES);
+    setCatalogCategories(demo.categorias);
+    setCatalogItems(demo.materiales);
   };
 
   // ---------- Kits ----------
@@ -395,6 +411,24 @@ function AppPrincipal() {
     setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, bitacora: [log, ...p.bitacora] } : p)));
   };
   const handleAddProjectDocument = (projectId: string, doc: Omit<ProjectDocument, 'id'>) => setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, documentos: [{ ...doc, id: uid('doc') }, ...p.documentos] } : p)));
+  // Consumo real de material de una obra. Al cerrarlo, la rentabilidad pasa a usarlo.
+  const handleGuardarConsumo = (projectId: string, consumo: ConsumoObra[], cerrado: boolean) => {
+    setProjects((prev) => prev.map((p) => {
+      if (p.id !== projectId) return p;
+      const coste = Math.round(consumo.reduce((a, c) => a + c.cantidadReal * c.costeUnitario, 0) * 100) / 100;
+      const previsto = Math.round(consumo.reduce((a, c) => a + c.cantidadPrevista * c.costeUnitario, 0) * 100) / 100;
+      const dif = Math.round((coste - previsto) * 100) / 100;
+      return {
+        ...p,
+        consumoReal: consumo,
+        consumoCerrado: cerrado,
+        bitacora: cerrado
+          ? [{ id: uid('log'), fecha: hoyISO(), autor: companySettings.nombreUsuario || 'Oficina', tipo: 'material' as const, texto: `Consumo de material cerrado: ${coste.toFixed(2)} € frente a ${previsto.toFixed(2)} € previstos (${dif >= 0 ? '+' : ''}${dif.toFixed(2)} €).` }, ...p.bitacora]
+          : p.bitacora,
+      };
+    }));
+  };
+
   const handleAddProjectPhoto = (projectId: string, photo: Omit<ProjectPhoto, 'id'>) => setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, fotos: [{ ...photo, id: uid('f') }, ...p.fotos] } : p)));
   const handleDeleteProject = (projectId: string) => {
     const p = projects.find((x) => x.id === projectId);
@@ -525,6 +559,10 @@ function AppPrincipal() {
     }
     setClients((prev) => prev.map((c) => (c.id === inv.clienteId ? { ...c, totalFacturado: (c.totalFacturado || 0) + inv.total, nif: c.nif || inv.clienteNif } : c)));
   };
+  // Cobros que no llegan por el extracto: efectivo, Bizum, o un banco que no importas
+  const handleRegistrarCobro = (invoiceId: string, cobro: CobroFactura) => setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? conCobro(i, cobro) : i)));
+  const handleQuitarCobro = (invoiceId: string, cobroId: string) => setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? sinCobro(i, { id: cobroId }) : i)));
+
   const handleUpdateInvoiceStatus = (invoiceId: string, estado: Invoice['estado']) => setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? { ...i, estado } : i)));
   const handleUpdateInvoice = (invoiceId: string, campos: Partial<Invoice>) => setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? { ...i, ...campos } : i)));
 
@@ -574,14 +612,22 @@ function AppPrincipal() {
   // ---------- Banco ----------
   const handleReconcileTransaction = (transactionId: string, refId: string, tipo: 'factura_venta' | 'gasto_compra', nombre?: string) => {
     setBankTransactions((prev) => prev.map((tx) => (tx.id === transactionId ? { ...tx, conciliado: true, conciliadoCon: { tipo, referenciaId: refId, referenciaNombre: nombre || refId } } : tx)));
-    if (tipo === 'factura_venta') setInvoices((prev) => prev.map((inv) => (inv.id === refId ? { ...inv, estado: 'Pagada', bancoConciliado: true, transaccionId: transactionId } : inv)));
+    if (tipo === 'factura_venta') {
+      // El ingreso del banco se anota como un cobro por SU importe, no marca la factura entera.
+      // Con el reparto habitual 50-50, hacen falta dos ingresos para darla por cobrada.
+      const tx = bankTransactions.find((t) => t.id === transactionId);
+      setInvoices((prev) => prev.map((inv) => (inv.id === refId
+        ? conCobro(inv, { id: `cob-${transactionId}`, fecha: tx?.fecha || hoyISO(), importe: Math.abs(tx?.importe || inv.total), metodo: 'Transferencia Bancaria', transaccionId: transactionId, nota: tx?.concepto?.substring(0, 80) })
+        : inv)));
+    }
     else setExpenses((prev) => prev.map((e) => (e.id === refId ? { ...e, estadoPago: 'Pagado', bancoConciliado: true, transaccionId: transactionId } : e)));
   };
   const handleUnreconcileTransaction = (transactionId: string) => {
     const tx = bankTransactions.find((t) => t.id === transactionId);
     if (!tx) return;
     setBankTransactions((prev) => prev.map((t) => (t.id === transactionId ? { ...t, conciliado: false, conciliadoCon: undefined } : t)));
-    if (tx.conciliadoCon?.tipo === 'factura_venta') setInvoices((prev) => prev.map((inv) => (inv.id === tx.conciliadoCon!.referenciaId ? { ...inv, bancoConciliado: false, transaccionId: undefined } : inv)));
+    // Al deshacer la conciliación se retira ese cobro y la factura vuelve a su estado real
+    if (tx.conciliadoCon?.tipo === 'factura_venta') setInvoices((prev) => prev.map((inv) => (inv.id === tx.conciliadoCon!.referenciaId ? sinCobro(inv, { transaccionId: transactionId }) : inv)));
     if (tx.conciliadoCon?.tipo === 'gasto_compra') setExpenses((prev) => prev.map((e) => (e.id === tx.conciliadoCon!.referenciaId ? { ...e, bancoConciliado: false, transaccionId: undefined } : e)));
   };
   const handleImportTransactions = (nuevas: BankTransaction[]) => {
@@ -606,8 +652,10 @@ function AppPrincipal() {
   const handleConfirmarCita = (projectId: string, hueco: HuecoPropuesto, tecnicos: string[], notas?: string): CalendarInstallation | null => {
     const p = projects.find((x) => x.id === projectId);
     if (!p) return null;
-    const inicio = `${hueco.fecha}T${hueco.horaInicio}:00`;
-    const fin = `${hueco.fecha}T${hueco.horaFin}:00`;
+    // Si hay un técnico asignado con horario propio, la cita se ajusta a sus horas
+    const h = tecnicos.length === 1 ? horasDeTecnico(tecnicos[0], hueco.franja, companySettings) : { inicio: hueco.horaInicio, fin: hueco.horaFin };
+    const inicio = `${hueco.fecha}T${h.inicio}:00`;
+    const fin = `${hueco.fecha}T${h.fin}:00`;
     const existente = calendarEvents.find((e) => e.obraId === projectId && e.tipo === 'Instalación' && e.estado !== 'Completada' && e.estado !== 'Cancelada');
     let ev: CalendarInstallation;
     if (existente) {
@@ -831,6 +879,20 @@ function AppPrincipal() {
           </div>
         </header>
 
+        {(() => {
+          const dias = diasSinCopiaLocal(companySettings);
+          const cada = companySettings.copias?.recordarCadaDias ?? 7;
+          if (avisoCopiaCerrado || activeTab === 'ajustes' || (dias !== null && dias < cada)) return null;
+          return (
+            <div className="mx-4 lg:mx-8 mt-3 p-3 rounded-2xl border border-amber-200 bg-amber-50 text-xs font-bold text-amber-900 flex items-center gap-2">
+              <Save size={15} className="shrink-0" />
+              <span className="flex-1">{dias === null ? 'No tienes ninguna copia guardada en tu ordenador. Si pierdes la cuenta de Google, lo pierdes todo.' : `Hace ${dias} días de tu última copia local.`}</span>
+              <button onClick={() => irA('ajustes')} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-black text-[11px] cursor-pointer shrink-0">Hacer copia</button>
+              <button onClick={() => setAvisoCopiaCerrado(true)} className="text-amber-700 hover:text-amber-900 cursor-pointer shrink-0" title="Ocultar hasta la próxima vez que abras"><X size={14} /></button>
+            </div>
+          );
+        })()}
+
         {conflictoInicial && (
           <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4">
@@ -871,7 +933,7 @@ function AppPrincipal() {
               firebaseUid={firebaseUser?.uid || null} siguienteCodigo={siguienteCodigoPresupuesto()} modo={activeTab === 'presupuestos' ? 'presupuestos' : 'obras'} abrirCitaDe={citaPendienteDe} onCitaAbierta={() => setCitaPendienteDe(null)}
               onSelectProject={setSelectedProjectId} onCreateProject={handleCreateProject} onUpdateProject={handleUpdateProject} onUpdateProjectStatus={handleUpdateProjectStatus} onUpdateClient={handleUpdateClient}
               onAcceptBudgetAndConvertToObra={handleAcceptBudgetAndConvertToObra} onConfirmarCita={handleConfirmarCita} onDeleteProject={handleDeleteProject} onAddCalendarEvent={handleAddCalendarEvent} onUpdateCalendarEvent={handleUpdateCalendarEvent}
-              onAddLog={handleAddProjectLog} onAddDocument={handleAddProjectDocument} onAddPhoto={handleAddProjectPhoto} onOpenNewInvoiceForProject={handleOpenNewInvoiceForProject} onOpenNewExpenseForProject={handleOpenNewExpenseForProject} onAviso={(t, tipo) => setAviso({ texto: t, tipo: tipo || 'info' })} />
+              onAddLog={handleAddProjectLog} onAddDocument={handleAddProjectDocument} onAddPhoto={handleAddProjectPhoto} onGuardarConsumo={handleGuardarConsumo} onOpenNewInvoiceForProject={handleOpenNewInvoiceForProject} onOpenNewExpenseForProject={handleOpenNewExpenseForProject} onAviso={(t, tipo) => setAviso({ texto: t, tipo: tipo || 'info' })} />
           )}
           {activeTab === 'agenda' && (
             <CalendarAgendaView calendarEvents={calendarEvents} projects={projects} clients={clients} companySettings={companySettings}
@@ -879,17 +941,19 @@ function AppPrincipal() {
           )}
           {(activeTab === 'catalogo' || activeTab === 'kits') && (
             <MaterialsAndKitsView categories={catalogCategories} items={catalogItems} kits={kits}
-              onAddItem={handleAddCatalogItem} onUpdateItem={handleUpdateCatalogItem} onDeleteItem={handleDeleteCatalogItem} onClearAllItems={handleClearAllCatalogItems}
-              onAddCategory={handleAddCatalogCategory} onUpdateCategory={handleUpdateCatalogCategory} onDeleteCategory={handleDeleteCatalogCategory} onResetToDefaults={handleResetCatalogToDefaults}
-              onSaveKit={handleSaveKit} onDeleteKit={handleDeleteKit} onDuplicateKit={handleDuplicateKit} onUsarEnPresupuesto={() => irA('presupuestos')} />
+              expenses={expenses} companySettings={companySettings}
+              onAddItem={handleAddCatalogItem} onUpdateItem={handleUpdateCatalogItem} onDeleteItem={handleDeleteCatalogItem}
+              onAddCategory={handleAddCatalogCategory} onPropagarCoste={handlePropagarCoste} onVaciarCatalogo={handleClearAllCatalogItems} onRestaurarCatalogo={handleResetCatalogToDefaults}
+              onSaveKit={handleSaveKit} onDeleteKit={handleDeleteKit} onDuplicateKit={handleDuplicateKit} onUsarEnPresupuesto={() => irA('presupuestos')}
+              onAviso={(t, tipo) => setAviso({ texto: t, tipo: tipo || 'info' })} />
           )}
           {activeTab === 'ventas' && (
             <SalesView invoices={invoices} clients={clients} projects={projects} companySettings={companySettings} siguienteNumero={siguienteNumeroFactura()} siguienteNumeroRectificativa={siguienteNumeroRectificativa()}
-              onCreateInvoice={handleCreateInvoice} onUpdateInvoiceStatus={handleUpdateInvoiceStatus} onUpdateInvoice={handleUpdateInvoice}
+              onCreateInvoice={handleCreateInvoice} onRegistrarCobro={handleRegistrarCobro} onQuitarCobro={handleQuitarCobro} onIrABanco={() => irA('bancos')} onUpdateInvoiceStatus={handleUpdateInvoiceStatus} onUpdateInvoice={handleUpdateInvoice}
               showNewInvoiceModal={showNewInvoiceModal} setShowNewInvoiceModal={setShowNewInvoiceModal} preselectedProject={preselectedProjectForInvoice} onAviso={(t, tipo) => setAviso({ texto: t, tipo: tipo || 'info' })} />
           )}
           {activeTab === 'gastos' && (
-            <ExpensesView expenses={expenses} projects={projects} suppliers={suppliers} companySettings={companySettings} onCreateExpense={handleCreateExpense} onCreateSupplier={handleCreateSupplier} onUpdateExpense={handleUpdateExpense} onDeleteExpense={handleDeleteExpense}
+            <ExpensesView expenses={expenses} projects={projects} suppliers={suppliers} companySettings={companySettings} catalogItems={catalogItems} onActualizarPrecios={handleActualizarPrecios} onCreateExpense={handleCreateExpense} onCreateSupplier={handleCreateSupplier} onUpdateExpense={handleUpdateExpense} onDeleteExpense={handleDeleteExpense}
               showNewExpenseModal={showNewExpenseModal} setShowNewExpenseModal={setShowNewExpenseModal} preselectedProject={preselectedProjectForInvoice} />
           )}
           {activeTab === 'bancos' && (

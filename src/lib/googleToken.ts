@@ -6,6 +6,9 @@ import { auth } from './firebase';
 
 export const SCOPE_CALENDAR = 'https://www.googleapis.com/auth/calendar.events';
 export const SCOPE_GMAIL = 'https://www.googleapis.com/auth/gmail.send';
+// drive.file: la app solo ve los archivos que ella crea. Es un permiso NO sensible,
+// así que no obliga a pasar la verificación de Google como sí hacen Gmail y Calendar.
+export const SCOPE_DRIVE = 'https://www.googleapis.com/auth/drive.file';
 const KEY_TOKEN = 'obracontrol_google_token';
 
 export interface TokenGoogle {
@@ -40,7 +43,7 @@ export function olvidarToken() {
 }
 
 // Abre la ventana de Google y devuelve un token con los permisos indicados
-export async function pedirPermisoGoogle(scopes: string[] = [SCOPE_CALENDAR, SCOPE_GMAIL]): Promise<TokenGoogle> {
+export async function pedirPermisoGoogle(scopes: string[] = [SCOPE_CALENDAR, SCOPE_GMAIL, SCOPE_DRIVE]): Promise<TokenGoogle> {
   const provider = new GoogleAuthProvider();
   scopes.forEach((s) => provider.addScope(s));
   provider.setCustomParameters({ prompt: 'consent select_account' });
@@ -60,7 +63,7 @@ export async function pedirPermisoGoogle(scopes: string[] = [SCOPE_CALENDAR, SCO
 export async function tokenPara(scope: string): Promise<string> {
   const t = leerToken();
   if (t && t.scopes.includes(scope)) return t.accessToken;
-  const nuevo = await pedirPermisoGoogle([SCOPE_CALENDAR, SCOPE_GMAIL]);
+  const nuevo = await pedirPermisoGoogle([SCOPE_CALENDAR, SCOPE_GMAIL, SCOPE_DRIVE]);
   return nuevo.accessToken;
 }
 

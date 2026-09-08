@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { TrendingUp, AlertTriangle, BarChart3, Search, ChevronRight, Eye, Package, Users, Wrench, Info } from 'lucide-react';
 import { Project, Expense, Invoice } from '../types';
+import { costeRealMateriales } from '../lib/consumo';
 import { formatCurrency } from '../utils/formatters';
 import { PeriodFilter } from './PeriodFilter';
 import { PeriodoFiltro, periodoActual, coincidePeriodo, aniosDisponibles, etiquetaPeriodo } from '../utils/dates';
@@ -23,7 +24,16 @@ export const RentabilityView: React.FC<Props> = ({ projects, expenses, invoices,
 
   // Coste previsto (escandallo de las partidas) frente a coste real (gastos imputados)
   const costePrevisto = (p: Project) => (p.partidas || []).reduce((a, x) => a + (x.costeInternoTotal || 0) * x.cantidad, 0);
-  const costeReal = (p: Project) => p.totalGastos || 0;
+  // Si la obra tiene el consumo de material cerrado, ese es el coste real de material.
+  // A eso se le suman los gastos imputados que no sean material (subcontratas, alquileres…).
+  const costeReal = (p: Project) => {
+    if (p.consumoCerrado && (p.consumoReal || []).length) {
+      const material = costeRealMateriales(p.consumoReal || []);
+      const otros = Math.max(0, (p.totalGastos || 0) - (p.desgloseGastos?.materiales || 0));
+      return Math.round((material + otros) * 100) / 100;
+    }
+    return p.totalGastos || 0;
+  };
   const ventaDe = (p: Project) => p.presupuestoAceptado || 0;
   const facturadoDe = (p: Project) => invoices.filter((i) => i.obraId === p.id && !['Anulada', 'Rectificada'].includes(i.estado)).reduce((a, i) => a + i.baseImponible, 0);
 
@@ -62,7 +72,7 @@ export const RentabilityView: React.FC<Props> = ({ projects, expenses, invoices,
           <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-lg"><TrendingUp size={22} /></div>
           <div>
             <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">Rentabilidad por obra</h1>
-            <p className="text-slate-500 text-sm mt-0.5">Precio de venta frente a coste previsto (escandallo) y coste real (gastos imputados) · {etiquetaPeriodo(periodo)}</p>
+            <p className="text-slate-500 text-sm mt-0.5">Precio de venta frente a coste previsto (escandallo) y coste real (material consumido en obra y gastos imputados) · {etiquetaPeriodo(periodo)}</p>
           </div>
         </div>
         <PeriodFilter value={periodo} onChange={setPeriodo} anios={anios} totalFiltrado={filtrados.length} totalGlobal={projects.filter((p) => estado !== 'obras' || ESTADOS_OBRA.includes(p.estado)).length} />
@@ -70,7 +80,7 @@ export const RentabilityView: React.FC<Props> = ({ projects, expenses, invoices,
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs"><div className="flex items-center justify-between text-slate-500 text-xs font-bold mb-2"><span>Venta (base)</span><div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center"><BarChart3 size={16} /></div></div><p className="text-2xl font-black text-slate-900">{formatCurrency(stats.venta)}</p><p className="text-[11px] text-slate-500 mt-2">{filtrados.length} obras en el periodo</p></div>
-        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs"><div className="flex items-center justify-between text-slate-500 text-xs font-bold mb-2"><span>Coste real (gastos)</span><div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center"><Package size={16} /></div></div><p className="text-2xl font-black text-slate-900">{formatCurrency(stats.real)}</p><p className="text-[11px] text-slate-500 mt-2">Previsto en escandallo: {formatCurrency(stats.previsto)}</p></div>
+        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs"><div className="flex items-center justify-between text-slate-500 text-xs font-bold mb-2"><span>Coste real</span><div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center"><Package size={16} /></div></div><p className="text-2xl font-black text-slate-900">{formatCurrency(stats.real)}</p><p className="text-[11px] text-slate-500 mt-2">Previsto en escandallo: {formatCurrency(stats.previsto)}</p></div>
         <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs"><div className="flex items-center justify-between text-slate-500 text-xs font-bold mb-2"><span>Beneficio bruto</span><div className={`w-8 h-8 rounded-xl flex items-center justify-center ${stats.beneficio >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}><TrendingUp size={16} /></div></div><p className={`text-2xl font-black ${stats.beneficio >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(stats.beneficio)}</p><span className={`inline-block text-[11px] font-bold mt-2 px-2 py-0.5 rounded-full ${stats.margen >= 30 ? 'bg-emerald-100 text-emerald-800' : stats.margen >= 15 ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'}`}>{stats.margen.toFixed(1)} % de margen</span></div>
         <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs"><div className="flex items-center justify-between text-slate-500 text-xs font-bold mb-2"><span>Atención</span><div className={`w-8 h-8 rounded-xl flex items-center justify-center ${stats.bajas > 0 ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'}`}><AlertTriangle size={16} /></div></div><p className="text-2xl font-black text-slate-900">{stats.bajas} obras</p><p className="text-[11px] mt-2 text-slate-500">{stats.bajas > 0 ? 'con margen real por debajo del 20 %' : 'todas con margen saludable'}{stats.sinCoste > 0 ? ` · ${stats.sinCoste} sin coste registrado` : ''}</p></div>
       </div>

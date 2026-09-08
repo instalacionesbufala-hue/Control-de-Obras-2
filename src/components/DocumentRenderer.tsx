@@ -103,7 +103,7 @@ export const DocumentRenderer: React.FC<DocumentRendererProps> = ({ tipo, doc, c
   const sinImpuestos = !!project?.sinImpuestos;
 
   // ---- Líneas y totales ----
-  const { lineas, baseImponible, ivasPorTipo, ivaTotal, irpfTotal, totalDoc } = useMemo(() => {
+  const { lineas, baseImponible, ivasPorTipo, irpfTotal, totalDoc } = useMemo(() => {
     let lineas: LineaDoc[] = [];
     if (invoice) {
       lineas = (invoice.lineas || []).map((l) => ({ concepto: l.concepto, cantidad: l.cantidad, unidad: l.unidad || 'ud', precioUnitario: l.precioUnitario, ivaPorcentaje: invoice.inversionSujetoPasivo ? 0 : l.ivaPorcentaje, total: l.cantidad * l.precioUnitario * (1 + (invoice.inversionSujetoPasivo ? 0 : l.ivaPorcentaje) / 100), materiales: l.materialesVisibles }));

@@ -13,6 +13,19 @@ export function franjasDe(s?: CompanySettings) {
 }
 
 // Técnicos que cubren una franja. Sin técnicos definidos, se considera que hay uno (el propio usuario).
+// Horas que hace un técnico en una franja: las suyas si las tiene, si no las de la empresa.
+export function horasDeTecnico(nombre: string, franja: 'manana' | 'tarde', settings?: CompanySettings): { inicio: string; fin: string } {
+  const propias = settings?.disponibilidadTecnicos?.[nombre]?.horas?.[franja];
+  return propias && propias.inicio && propias.fin ? propias : franjasDe(settings)[franja];
+}
+
+// ¿Tiene este técnico un horario distinto del general en esta franja?
+export function horarioPropio(nombre: string, franja: 'manana' | 'tarde', settings?: CompanySettings): boolean {
+  const g = franjasDe(settings)[franja];
+  const h = horasDeTecnico(nombre, franja, settings);
+  return h.inicio !== g.inicio || h.fin !== g.fin;
+}
+
 export function tecnicosDisponibles(franja: 'manana' | 'tarde', settings?: CompanySettings): string[] {
   const nombres = settings?.tecnicos || [];
   if (nombres.length === 0) return ['*'];

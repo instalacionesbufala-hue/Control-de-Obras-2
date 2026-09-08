@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { PackagePlus, Info } from 'lucide-react';
-import { Kit, CatalogItem, CatalogCategory } from '../types';
+import { Kit, CatalogItem, CatalogCategory, CompanySettings } from '../types';
 import { KitsListView } from './KitsListView';
 import { KitBuilderModal } from './KitBuilderModal';
 
@@ -11,11 +11,12 @@ interface Props {
   onSaveKit: (kit: Kit) => void;
   onDeleteKit: (id: string) => void;
   onDuplicateKit: (kit: Kit) => void;
+  companySettings?: CompanySettings;
   onUsarEnPresupuesto?: (kit: Kit) => void;
   embebido?: boolean;
 }
 
-export const KitsView: React.FC<Props> = ({ kits, catalogItems, catalogCategories, onSaveKit, onDeleteKit, onDuplicateKit, onUsarEnPresupuesto, embebido = false }) => {
+export const KitsView: React.FC<Props> = ({ kits, catalogItems, catalogCategories, onSaveKit, onDeleteKit, onDuplicateKit, onUsarEnPresupuesto, companySettings, embebido = false }) => {
   const [showBuilder, setShowBuilder] = useState(false);
   const [kitToEdit, setKitToEdit] = useState<Kit | null>(null);
 
@@ -42,7 +43,7 @@ export const KitsView: React.FC<Props> = ({ kits, catalogItems, catalogCategorie
         onInsertKitToProject={onUsarEnPresupuesto}
       />
 
-      <KitBuilderModal isOpen={showBuilder} kitToEdit={kitToEdit} catalogItems={catalogItems} categorias={catalogCategories.map((c) => c.nombre)} onSave={onSaveKit} onClose={() => setShowBuilder(false)} />
+      <KitBuilderModal isOpen={showBuilder} kitToEdit={kitToEdit} catalogItems={catalogItems} categorias={catalogCategories.map((c) => c.nombre)} margenObjetivo={companySettings?.margenObjetivo ?? 40} onSave={onSaveKit} onClose={() => setShowBuilder(false)} />
     </div>
   );
 };

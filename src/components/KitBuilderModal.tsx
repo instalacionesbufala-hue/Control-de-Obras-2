@@ -4,6 +4,7 @@ import {
   CheckCircle2, AlertCircle, Percent, Euro, Layers
 } from 'lucide-react';
 import { Kit, KitItem, CatalogItem } from '../types';
+import { margenDe, ventaConMargen, costeDe } from '../lib/catalogo';
 import { formatCurrency } from '../utils/formatters';
 
 interface KitBuilderModalProps {
@@ -11,6 +12,7 @@ interface KitBuilderModalProps {
   kitToEdit: Kit | null;
   catalogItems: CatalogItem[];
   categorias?: string[];
+  margenObjetivo?: number; // margen por defecto de la empresa, para el selector rápido
   onSave: (kit: Kit) => void;
   onClose: () => void;
 }
@@ -20,6 +22,7 @@ export const KitBuilderModal: React.FC<KitBuilderModalProps> = ({
   kitToEdit,
   catalogItems,
   categorias = [],
+  margenObjetivo = 40,
   onSave,
   onClose,
 }) => {
@@ -59,7 +62,7 @@ export const KitBuilderModal: React.FC<KitBuilderModalProps> = ({
       concepto: catItem.concepto,
       cantidad: 1,
       unidad: catItem.unidad || 'ud',
-      precioCoste: catItem.costeInternoTotal || 0,
+      precioCoste: costeDe(catItem),
       proveedor: catItem.proveedorHabitual,
       precioVenta: catItem.precioUnitario,
       ivaPorcentaje: catItem.ivaPorcentaje || 21,
@@ -99,9 +102,11 @@ export const KitBuilderModal: React.FC<KitBuilderModalProps> = ({
   const precioCosteTotal = partidas.reduce((acc, p) => acc + (Number(p.cantidad) || 0) * (Number(p.precioCoste) || 0), 0);
   const precioVentaTotal = partidas.reduce((acc, p) => acc + (Number(p.cantidad) || 0) * (Number(p.precioVenta) || 0), 0);
   const beneficioNeto = precioVentaTotal - precioCosteTotal;
-  const margenPorcentaje = precioVentaTotal > 0 
-    ? Math.round((beneficioNeto / precioVentaTotal) * 100) 
-    : 0;
+  // Margen sobre el coste, el mismo criterio que en materiales y en los presupuestos
+  const margenPorcentaje = margenDe(precioCosteTotal, precioVentaTotal);
+
+  // Fija el precio de venta de todas las líneas aplicando el mismo margen sobre su coste
+  const aplicarMargen = (pct: number) => setPartidas((prev) => prev.map((p) => ({ ...p, precioVenta: ventaConMargen(Number(p.precioCoste) || 0, pct) })));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -273,7 +278,7 @@ export const KitBuilderModal: React.FC<KitBuilderModalProps> = ({
               </div>
             ) : (
               <div className="space-y-2.5">
-                {partidas.map((item, idx) => {
+                {partidas.map((item) => {
                   const subCost = (Number(item.cantidad) || 0) * (Number(item.precioCoste) || 0);
                   const subVenta = (Number(item.cantidad) || 0) * (Number(item.precioVenta) || 0);
                   const subMargin = subVenta > 0 ? Math.round(((subVenta - subCost) / subVenta) * 100) : 0;
@@ -389,7 +394,7 @@ export const KitBuilderModal: React.FC<KitBuilderModalProps> = ({
             </div>
 
             <div>
-              <p className="text-[10px] font-bold uppercase text-slate-400">Margen Comercial</p>
+              <p className="text-[10px] font-bold uppercase text-slate-400">Margen sobre coste</p>
               <div className="flex items-center gap-2 mt-0.5">
                 <span className={`text-lg font-black font-mono ${
                   margenPorcentaje >= 35 ? 'text-emerald-400' : 'text-amber-400'
@@ -400,7 +405,21 @@ export const KitBuilderModal: React.FC<KitBuilderModalProps> = ({
                   {margenPorcentaje >= 35 ? 'Bien' : margenPorcentaje >= 20 ? 'Ajustado' : 'Bajo'}
                 </span>
               </div>
-              <span className="text-[9px] text-slate-400">Sobre precio de venta</span>
+              <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                <span className="text-[9px] text-slate-500 mr-0.5">Aplicar a todo el kit:</span>
+                {[30, 40, 50, 60, 80].map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => aplicarMargen(p)}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer border hover:bg-slate-800 ${p === margenObjetivo ? 'border-emerald-500 text-emerald-300' : 'border-slate-700 text-slate-400'}`}
+                    title={p === margenObjetivo ? 'Tu margen objetivo' : `Recalcular el precio de venta con un ${p} % sobre el coste`}
+                  >
+                    {p} %
+                  </button>
+                ))}
+              </div>
+              <span className="text-[9px] text-slate-400">Sobre el coste. Puedes seguir poniendo el precio a mano en cada línea.</span>
             </div>
           </div>
 

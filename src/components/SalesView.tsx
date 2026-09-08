@@ -2,10 +2,11 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { BadgeEuro, Plus, Download, Search, ShieldCheck, Eye, MessageSquare, X, AlertCircle, Send, Trash2, CheckCircle2, Copy, Check, FileText, Ban, RefreshCcw } from 'lucide-react';
 import { DocumentRenderer } from './DocumentRenderer';
 import { PeriodFilter } from './PeriodFilter';
-import { Invoice, Client, Project, CompanySettings, InvoiceLine, TipoFacturaVerifactu } from '../types';
+import { Invoice, Client, Project, CompanySettings, InvoiceLine, TipoFacturaVerifactu, CobroFactura } from '../types';
 import { formatCurrency, formatDate, uid, telefonoWhatsApp, redondear2 } from '../utils/formatters';
 import { PeriodoFiltro, periodoActual, coincidePeriodo, aniosDisponibles, hoyISO, addDays, etiquetaPeriodo } from '../utils/dates';
 import { generarRegistroAlta, verificarCadena, csvLibroEmitidas, autocomprobarAlgoritmo, TIPOS_RECTIFICATIVA } from '../lib/verifactu';
+import { totalCobrado, pendienteDe, situacionDe, diasVencida, textoReclamacion } from '../lib/cobros';
 import { descargarArchivo } from '../lib/googleCalendar';
 
 interface Props {
@@ -16,6 +17,9 @@ interface Props {
   siguienteNumero: string;
   siguienteNumeroRectificativa: string;
   onCreateInvoice: (inv: Invoice, opciones?: { serie?: 'factura' | 'rectificativa'; original?: Invoice }) => void;
+  onRegistrarCobro: (invoiceId: string, cobro: CobroFactura) => void;
+  onQuitarCobro: (invoiceId: string, cobroId: string) => void;
+  onIrABanco?: () => void;
   onUpdateInvoiceStatus: (id: string, estado: Invoice['estado']) => void;
   onUpdateInvoice: (id: string, campos: Partial<Invoice>) => void;
   showNewInvoiceModal: boolean;
@@ -26,7 +30,7 @@ interface Props {
 
 type LineaForm = { id: string; concepto: string; cantidad: number; unidad: string; precioUnitario: number; ivaPorcentaje: number; materialesVisibles?: InvoiceLine['materialesVisibles'] };
 
-export const SalesView: React.FC<Props> = ({ invoices, clients, projects, companySettings, siguienteNumero, siguienteNumeroRectificativa, onCreateInvoice, onUpdateInvoiceStatus, onUpdateInvoice, showNewInvoiceModal, setShowNewInvoiceModal, preselectedProject, onAviso }) => {
+export const SalesView: React.FC<Props> = ({ invoices, clients, projects, companySettings, siguienteNumero, siguienteNumeroRectificativa, onCreateInvoice, onRegistrarCobro, onQuitarCobro, onIrABanco, onUpdateInvoiceStatus, onUpdateInvoice, showNewInvoiceModal, setShowNewInvoiceModal, preselectedProject, onAviso }) => {
   const [periodo, setPeriodo] = useState<PeriodoFiltro>(periodoActual());
   const [busqueda, setBusqueda] = useState('');
   const [estadoFiltro, setEstadoFiltro] = useState('todos');
@@ -38,6 +42,9 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
   const [verificacion, setVerificacion] = useState<{ ok: boolean; errores: string[] } | null>(null);
   const [algoritmoOk, setAlgoritmoOk] = useState<boolean | null>(null);
   const [verPDFCorreo, setVerPDFCorreo] = useState(false);
+  // Cobros de una factura: los del banco no se tocan desde aquí, los de efectivo o Bizum sí
+  const [cobrosDe, setCobrosDe] = useState<Invoice | null>(null);
+  const [nuevoCobro, setNuevoCobro] = useState({ importe: 0, fecha: hoyISO(), metodo: 'Transferencia Bancaria', nota: '' });
   const [rectificar, setRectificar] = useState<Invoice | null>(null);
   const [rectTipo, setRectTipo] = useState<TipoFacturaVerifactu>('R1');
   const [rectModo, setRectModo] = useState<'S' | 'I'>('S');
@@ -194,6 +201,23 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
 
   // ---- Rectificativas (R1-R4) ----
   const lineasDesde = (inv: Invoice): LineaForm[] => inv.lineas.map((l) => ({ id: uid('l'), concepto: l.concepto, cantidad: l.cantidad, unidad: l.unidad || 'ud', precioUnitario: l.precioUnitario, ivaPorcentaje: l.ivaPorcentaje, materialesVisibles: l.materialesVisibles }));
+  const abrirCobros = (inv: Invoice) => {
+    setCobrosDe(inv);
+    setNuevoCobro({ importe: pendienteDe(inv), fecha: hoyISO(), metodo: inv.metodoPago || 'Transferencia Bancaria', nota: '' });
+  };
+  const anotarCobro = () => {
+    if (!cobrosDe) return;
+    if (nuevoCobro.importe <= 0) return onAviso?.('El importe del cobro debe ser mayor que cero.', 'error');
+    onRegistrarCobro(cobrosDe.id, { id: uid('cob'), fecha: nuevoCobro.fecha, importe: redondear2(nuevoCobro.importe), metodo: nuevoCobro.metodo, nota: nuevoCobro.nota.trim() || undefined });
+    onAviso?.(`Cobro de ${formatCurrency(nuevoCobro.importe)} anotado en ${cobrosDe.numero}.`, 'ok');
+    setCobrosDe(null);
+  };
+  const reclamar = (inv: Invoice) => {
+    const texto = textoReclamacion(inv, companySettings.nombreComercial || companySettings.razonSocial, companySettings.ibanPrincipal);
+    const tel = telefonoWhatsApp(clients.find((c) => c.id === inv.clienteId)?.telefono);
+    window.open(tel ? `https://wa.me/${tel}?text=${encodeURIComponent(texto)}` : `https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
+  };
+
   const abrirRectificar = (inv: Invoice) => {
     setRectificar(inv);
     setRectTipo('R1');
@@ -287,7 +311,7 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3"><BadgeEuro className="text-blue-600" size={28} /> Facturas</h1>
-          <p className="text-slate-500 text-sm mt-1">Numeración correlativa, huella SHA-256 encadenada y QR de cotejo conforme al RD 1007/2023. Una factura emitida no se borra: se anula o se rectifica. Una factura emitida no se borra: se anula o se rectifica. Una factura emitida no se borra: se anula o se rectifica · {etiquetaPeriodo(periodo)}</p>
+          <p className="text-slate-500 text-sm mt-1">Numeración correlativa, huella SHA-256 encadenada y QR de cotejo conforme al RD 1007/2023. Una factura emitida no se borra: se anula o se rectifica · {etiquetaPeriodo(periodo)}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <PeriodFilter value={periodo} onChange={setPeriodo} anios={anios} totalFiltrado={filtradas.length} totalGlobal={invoices.filter((i) => estadoFiltro === 'todos' || i.estado === estadoFiltro).length} />
@@ -340,11 +364,19 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
                       <td className="p-4 text-right text-xs"><p className="font-medium text-slate-600">{formatCurrency(inv.baseImponible)}</p><p className="text-[10px] text-slate-400">+ {formatCurrency(inv.ivaTotal)} IVA{inv.irpfTotal ? ` − ${formatCurrency(inv.irpfTotal)} IRPF` : ''}</p></td>
                       <td className="p-4 text-right"><span className="font-black text-slate-900 text-sm">{formatCurrency(inv.total)}</span></td>
                       <td className="p-4 text-center">
-                        {inv.estado === 'Anulada' || inv.estado === 'Rectificada' ? <span className="text-xs font-black px-2.5 py-1 rounded-full bg-slate-200 text-slate-600">{inv.estado}</span> : (
-                          <select value={inv.estado} onChange={(e) => onUpdateInvoiceStatus(inv.id, e.target.value as Invoice['estado'])} className={`text-xs font-black px-2.5 py-1 rounded-full border-0 outline-none cursor-pointer ${inv.estado === 'Pagada' ? 'bg-emerald-100 text-emerald-800' : vencida ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'}`} title="Estado del cobro (no afecta al registro fiscal)">
-                            <option value="Pendiente">Por cobrar</option><option value="Pagada">Cobrada</option><option value="Vencida">Vencida</option>
-                          </select>
-                        )}
+                        {inv.estado === 'Anulada' || inv.estado === 'Rectificada' ? <span className="text-xs font-black px-2.5 py-1 rounded-full bg-slate-200 text-slate-600">{inv.estado}</span> : (() => {
+                          const cobrado = totalCobrado(inv);
+                          const pend = pendienteDe(inv);
+                          const sit = situacionDe(inv);
+                          const dias = diasVencida(inv);
+                          return (
+                            <button onClick={() => abrirCobros(inv)} className={`w-full inline-flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-xl border cursor-pointer ${sit === 'cobrada' ? 'bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100' : sit === 'parcial' ? 'bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100' : dias > 0 ? 'bg-rose-50 border-rose-200 text-rose-800 hover:bg-rose-100' : 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100'}`} title="Ver y registrar cobros">
+                              <span className="text-[11px] font-black uppercase">{sit === 'cobrada' ? 'Cobrada' : sit === 'parcial' ? 'A medias' : dias > 0 ? `${dias} d de retraso` : 'Por cobrar'}</span>
+                              {sit !== 'cobrada' && <span className="text-[10px] font-bold">Faltan {formatCurrency(pend)}</span>}
+                              {sit === 'parcial' && <span className="text-[9px] opacity-80">cobrado {formatCurrency(cobrado)}</span>}
+                            </button>
+                          );
+                        })()}
                       </td>
                       <td className="p-4 text-center">
                         <button onClick={() => setVerVerifactu(inv)} className={`inline-flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl border cursor-pointer ${inv.verifactu?.cadena ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`} title="Ver registro de facturación">
@@ -508,6 +540,70 @@ export const SalesView: React.FC<Props> = ({ invoices, clients, projects, compan
           </div>
         </div>
       )}
+
+      {cobrosDe && (() => {
+        const inv = invoices.find((i) => i.id === cobrosDe.id) || cobrosDe;
+        const cobrado = totalCobrado(inv);
+        const pend = pendienteDe(inv);
+        const dias = diasVencida(inv);
+        return (
+          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto">
+            <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl my-6 overflow-hidden">
+              <div className="p-5 bg-slate-900 text-white flex justify-between items-start">
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-blue-500 px-2 py-0.5 rounded">Cobros</span>
+                  <h3 className="text-lg font-black mt-1">{inv.numero}</h3>
+                  <p className="text-[11px] text-slate-400">{inv.clienteNombre} · {formatCurrency(inv.total)} · vence {formatDate(inv.fechaVencimiento)}{dias > 0 ? ` · ${dias} días de retraso` : ''}</p>
+                </div>
+                <button onClick={() => setCobrosDe(null)} className="text-slate-400 hover:text-white cursor-pointer"><X size={20} /></button>
+              </div>
+              <div className="p-6 space-y-4 text-xs">
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200"><p className="text-[10px] uppercase font-black text-slate-400">Total</p><p className="font-black text-slate-900 text-sm">{formatCurrency(inv.total)}</p></div>
+                  <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200"><p className="text-[10px] uppercase font-black text-emerald-600">Cobrado</p><p className="font-black text-emerald-800 text-sm">{formatCurrency(cobrado)}</p></div>
+                  <div className={`p-3 rounded-2xl border ${pend > 0.01 ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}><p className="text-[10px] uppercase font-black text-amber-600">Pendiente</p><p className="font-black text-amber-800 text-sm">{formatCurrency(pend)}</p></div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <p className="font-black text-slate-800">Cobros registrados</p>
+                  {(inv.cobros || []).length === 0 && <p className="p-3 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-slate-500">Todavía no consta ningún cobro. Los ingresos que concilies en la pestaña del banco aparecerán aquí solos.</p>}
+                  {(inv.cobros || []).map((c) => (
+                    <div key={c.id} className="flex items-center gap-2 p-2.5 bg-white border border-slate-200 rounded-xl">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${c.transaccionId ? 'bg-emerald-500' : 'bg-slate-400'}`} title={c.transaccionId ? 'Conciliado con el banco' : 'Anotado a mano'} />
+                      <span className="flex-1 min-w-0"><span className="font-bold text-slate-800 block">{formatCurrency(c.importe)} · {formatDate(c.fecha)}</span><span className="text-[10px] text-slate-500 block truncate">{c.transaccionId ? 'Desde el extracto del banco' : c.metodo || 'A mano'}{c.nota ? ` · ${c.nota}` : ''}</span></span>
+                      {c.transaccionId
+                        ? <button onClick={() => { setCobrosDe(null); onIrABanco?.(); }} className="text-[10px] font-bold text-blue-600 hover:underline cursor-pointer shrink-0">Ver en el banco</button>
+                        : <button onClick={() => onQuitarCobro(inv.id, c.id)} className="p-1.5 text-slate-400 hover:text-rose-600 cursor-pointer shrink-0" title="Quitar este cobro"><Trash2 size={14} /></button>}
+                    </div>
+                  ))}
+                </div>
+
+                {pend > 0.01 && (
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5">
+                    <p className="font-black text-slate-800">Anotar un cobro que no pasa por el extracto</p>
+                    <p className="text-[11px] text-slate-500">Efectivo, Bizum o un banco que no importas. Si el ingreso llega por transferencia, es mejor concíliarlo en la pestaña del banco: así queda enlazado al movimiento.</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      <div><label className="block font-bold text-slate-600 mb-1">Importe</label><input type="number" step="0.01" min="0" value={nuevoCobro.importe || ''} onChange={(e) => setNuevoCobro({ ...nuevoCobro, importe: Number(e.target.value) })} className="w-full border border-slate-200 rounded-xl px-2.5 py-2 font-black bg-white" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">Fecha</label><input type="date" value={nuevoCobro.fecha} onChange={(e) => setNuevoCobro({ ...nuevoCobro, fecha: e.target.value })} className="w-full border border-slate-200 rounded-xl px-2.5 py-2 bg-white" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">Forma</label><select value={nuevoCobro.metodo} onChange={(e) => setNuevoCobro({ ...nuevoCobro, metodo: e.target.value })} className="w-full border border-slate-200 rounded-xl px-2 py-2 bg-white">{['Transferencia Bancaria', 'Efectivo', 'Bizum', 'TPV', 'Pagaré', 'Domiciliación'].map((m) => <option key={m} value={m}>{m}</option>)}</select></div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => setNuevoCobro({ ...nuevoCobro, importe: redondear2(inv.total / 2) })} className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg font-bold cursor-pointer">50 %</button>
+                      <button type="button" onClick={() => setNuevoCobro({ ...nuevoCobro, importe: pend })} className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg font-bold cursor-pointer">Todo lo que falta</button>
+                      <button type="button" onClick={anotarCobro} className="ml-auto px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-black cursor-pointer">Anotar cobro</button>
+                    </div>
+                  </div>
+                )}
+
+                {pend > 0.01 && (
+                  <button onClick={() => reclamar(inv)} className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-black flex items-center justify-center gap-2 cursor-pointer"><MessageSquare size={15} /> Reclamar por WhatsApp</button>
+                )}
+                <p className="text-[10px] text-slate-400 text-center">El estado de cobro sale de sumar estos cobros. No cambia el registro fiscal de la factura ni su huella.</p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {rectificar && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto">
