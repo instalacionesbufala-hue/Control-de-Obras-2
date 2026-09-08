@@ -301,19 +301,16 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
             <div className="flex-1"><p className="font-bold text-slate-800">Margen objetivo</p><p className="text-[11px] text-slate-500">Se usa para sugerir el precio de venta de materiales, kits y partidas. Siempre puedes escribir el precio a mano.</p></div>
             <div className="flex items-center gap-2 shrink-0"><input type="number" min="0" max="500" value={f.margenObjetivo ?? 40} onChange={(e) => set('margenObjetivo', Number(e.target.value))} className="w-24 border border-slate-200 rounded-xl px-3 py-2 font-black text-right" /><span className="font-bold text-slate-600">% sobre el coste</span></div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 text-xs">
             {([['prefijoPresupuestos', 'siguienteNumeroPresupuesto', 'Presupuestos'], ['prefijoObras', 'siguienteNumeroObra', 'Obras'], ['prefijoFacturas', 'siguienteNumeroFactura', 'Facturas'], ['prefijoRectificativas', 'siguienteNumeroRectificativa', 'Rectificativas']] as Array<[keyof CompanySettings, keyof CompanySettings, string]>).map(([pk, nk, label]) => (
               <div key={label} className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
                 <p className="font-black text-slate-800">{label}</p>
-                <div className="flex gap-2"><input value={f[pk] as string} onChange={(e) => set(pk, e.target.value as any)} className="flex-1 border border-slate-200 rounded-xl px-3 py-2 font-mono" /><input type="number" min={1} value={f[nk] as number} onChange={(e) => set(nk, Number(e.target.value) as any)} className="w-20 border border-slate-200 rounded-xl px-2 py-2 font-mono text-center" /></div>
+                <div className="flex gap-2 min-w-0"><input value={f[pk] as string} onChange={(e) => set(pk, e.target.value as any)} title="Prefijo de la serie" className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2 font-mono" /><input type="number" min={1} value={f[nk] as number} onChange={(e) => set(nk, Number(e.target.value) as any)} title="Siguiente número" className="w-16 shrink-0 border border-slate-200 rounded-xl px-2 py-2 font-mono text-center" /></div>
                 <p className="text-[11px] text-slate-500">Siguiente: <strong className="font-mono">{numeroDocumento(f[pk] as string, f[nk] as number)}</strong></p>
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 text-xs">
-            <div><label className="block font-bold text-slate-700 mb-1">Comentario al pie de los presupuestos (por defecto)</label><textarea value={f.notaFinalPresupuestoDefecto} onChange={(e) => set('notaFinalPresupuestoDefecto', e.target.value)} rows={4} className="w-full border border-slate-200 rounded-xl px-3 py-2" /><p className="text-[10px] text-slate-400 mt-1">Forma de pago, validez, garantía… Se puede cambiar en cada presupuesto y en cada plantilla.</p></div>
-            <div className="space-y-3"><div><label className="block font-bold text-slate-700 mb-1">Condiciones al pie de las facturas</label><textarea value={f.condicionesPagoDefecto} onChange={(e) => set('condicionesPagoDefecto', e.target.value)} rows={2} className="w-full border border-slate-200 rounded-xl px-3 py-2" /></div><div className="grid grid-cols-2 gap-2"><Campo label="Validez del presupuesto (días)" value={String(f.diasValidezPresupuesto)} onChange={(v) => set('diasValidezPresupuesto', Number(v) || 30)} /><Campo label="Vencimiento facturas (días)" value={String(f.diasVencimientoFactura)} onChange={(v) => set('diasVencimientoFactura', Number(v) || 30)} /></div></div>
-          </div>
+          <div className="mt-4 p-3.5 bg-blue-50 border border-blue-200 rounded-2xl text-xs text-blue-900 flex items-start gap-2"><Info size={15} className="shrink-0 mt-0.5" /><span>La validez, el vencimiento, los textos al pie, la plantilla, el IVA y la forma de pago por defecto se ajustan desde el botón <b>Ajustes</b> de las pestañas <b>Presupuestos</b> y <b>Facturas</b>, cada uno en la suya.</span></div>
         </Seccion>
 
         {/* 4. TÉCNICOS Y FRANJAS */}
@@ -504,9 +501,14 @@ export const SettingsView: React.FC<Props> = ({ companySettings, onSaveSettings,
               <div className="flex gap-2 flex-wrap"><button type="button" onClick={copiaLocal} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold cursor-pointer">Descargar copia</button><input type="file" ref={copiaRef} accept=".json" className="hidden" onChange={importar} /><button type="button" onClick={() => copiaRef.current?.click()} className="px-3.5 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer">Restaurar desde archivo</button><button type="button" onClick={restaurarAnterior} className="px-3.5 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer" title="Versión guardada automáticamente antes de la última carga desde la nube o restauración">Versión anterior</button></div>
             </div>
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-              <p className="font-black text-slate-900 flex items-center gap-1.5"><Cloud size={14} /> Copia en la nube</p>
-              <p className="text-slate-500 text-[11px]">Además de la sincronización continua, guarda una foto manual que puedes restaurar. {f.copias?.ultimaNube ? `Última: ${fechaHoraES(f.copias.ultimaNube.replace('Z', ''))}.` : firebaseUser ? 'Aún no has hecho ninguna.' : 'Requiere Google vinculado.'}</p>
-              <div className="flex gap-2 flex-wrap"><button type="button" onClick={copiaNube} disabled={!firebaseUser || ocupado === 'nube'} className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold cursor-pointer disabled:opacity-50">Guardar en la nube</button><button type="button" onClick={restaurarNube} disabled={!firebaseUser || ocupado === 'nube'} className="px-3.5 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer disabled:opacity-50">Restaurar de la nube</button></div>
+              <p className="font-black text-slate-900 flex items-center gap-1.5"><Cloud size={14} /> Nube de Google</p>
+              {firebaseUser && (
+                <p className={`text-[11px] font-bold ${estadoNube === 'error' ? 'text-rose-700' : estadoNube === 'sincronizado' ? 'text-emerald-700' : 'text-slate-600'}`}>
+                  {estadoNube === 'sincronizado' ? `Sincronización continua al día · último cambio guardado ${fechaHoraES(estadoCompleto.updatedAt.replace('Z', ''))}` : estadoNube === 'guardando' ? 'Guardando el último cambio en la nube…' : estadoNube === 'cargando' ? 'Cargando desde la nube…' : estadoNube === 'error' ? `No se ha podido guardar en la nube${errorNube ? `: ${errorNube}` : ''}` : 'Sin conexión con la nube.'}
+                </p>
+              )}
+              <p className="text-slate-500 text-[11px]">Cada vez que guardas algo (también el botón «Guardar cambios» de arriba) se sube solo a tu cuenta. Aparte, puedes guardar una <b>foto manual</b> del estado completo, que se conserva aunque sigas trabajando y se puede restaurar. {f.copias?.ultimaNube ? `Última foto manual: ${fechaHoraES(f.copias.ultimaNube.replace('Z', ''))}.` : firebaseUser ? 'Aún no has guardado ninguna foto manual.' : 'Requiere Google vinculado.'}</p>
+              <div className="flex gap-2 flex-wrap"><button type="button" onClick={copiaNube} disabled={!firebaseUser || ocupado === 'nube'} className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold cursor-pointer disabled:opacity-50">Guardar foto manual</button><button type="button" onClick={restaurarNube} disabled={!firebaseUser || ocupado === 'nube'} className="px-3.5 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer disabled:opacity-50">Restaurar la última foto</button></div>
             </div>
           </div>
         </Seccion>
