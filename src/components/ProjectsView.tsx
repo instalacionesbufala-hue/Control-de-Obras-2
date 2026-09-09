@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FileCheck2, Plus, Search, Calendar, FileText, CheckCircle2, Trash2, Clock, User, MapPin, X, Upload, HardHat, XCircle, Sparkles, Check, ShieldCheck, Send, Phone, Mail, Eye, CalendarDays, Calculator, Lock, PenTool, PackagePlus, Copy, Link as LinkIcon, AlertCircle, EyeOff, Edit3, Image as ImageIcon, Info, SlidersHorizontal } from 'lucide-react';
+import { FileCheck2, Plus, Search, Calendar, FileText, CheckCircle2, Trash2, Clock, User, MapPin, X, Upload, HardHat, XCircle, Sparkles, Check, ShieldCheck, Send, Phone, Mail, Eye, CalendarDays, Calculator, Lock, PenTool, PackagePlus, Copy, Link as LinkIcon, AlertCircle, EyeOff, Edit3, Image as ImageIcon, Info, SlidersHorizontal, ArrowLeft } from 'lucide-react';
 import { Project, Client, ProjectDocument, ProjectPhoto, ProjectLog, PresupuestoPartida, CatalogCategory, CatalogItem, MaterialCostComponent, CalendarInstallation, CompanySettings, Kit, FirmaCliente, HuecoPropuesto, Invoice, ConsumoObra, MOTIVOS_SIN_IMPUESTOS } from '../types';
 import { formatCurrency, formatDate, uid, telefonoWhatsApp, redondear2 } from '../utils/formatters';
 import { PeriodFilter } from './PeriodFilter';
@@ -425,6 +425,7 @@ export const ProjectsView: React.FC<Props> = (props) => {
         </div>
       </div>
 
+      {!selected && (
       <div className="bg-white p-4 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row gap-3 items-center justify-between">
         <div className="relative w-full md:w-80"><Search className="absolute left-4 top-3 text-slate-400" size={18} /><input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} className="w-full pl-11 pr-4 py-2.5 border border-slate-200 rounded-2xl bg-slate-50/80 text-xs outline-none" placeholder="Cliente, código, dirección…" /></div>
         <div className="flex bg-slate-100/90 p-1.5 rounded-2xl">
@@ -434,12 +435,15 @@ export const ProjectsView: React.FC<Props> = (props) => {
           ).map(([id, l]) => <button key={id} onClick={() => setSub(id)} className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${sub === id ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'}`}>{l}</button>)}
         </div>
       </div>
+      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      {/* Lista a todo el ancho; al abrir una obra o presupuesto, la ficha ocupa toda la pantalla */}
+      <div className={selected ? '' : 'grid grid-cols-1 lg:grid-cols-12 gap-6'}>
         {/* LISTA */}
-        <div className="lg:col-span-5 space-y-3">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1">{filtrados.length} registros</span>
-          {filtrados.length === 0 && <div className="p-8 bg-white rounded-3xl border border-dashed border-slate-200 text-center text-xs text-slate-400">{esPresupuestos && sub === 'activos' ? 'Ningún presupuesto pendiente de respuesta' : 'Nada'} en {etiquetaPeriodo(periodo).toLowerCase()}. {projects.length > 0 && <button onClick={() => setPeriodo({ mes: 'todos', anio: 'todos' })} className="text-blue-600 font-bold hover:underline cursor-pointer">Ver todo</button>}</div>}
+        {!selected && (
+        <div className="lg:col-span-12 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          <span className="col-span-full text-xs font-bold text-slate-400 uppercase tracking-wider px-1">{filtrados.length} registros</span>
+          {filtrados.length === 0 && <div className="col-span-full p-8 bg-white rounded-3xl border border-dashed border-slate-200 text-center text-xs text-slate-400">{esPresupuestos && sub === 'activos' ? 'Ningún presupuesto pendiente de respuesta' : 'Nada'} en {etiquetaPeriodo(periodo).toLowerCase()}. {projects.length > 0 && <button onClick={() => setPeriodo({ mes: 'todos', anio: 'todos' })} className="text-blue-600 font-bold hover:underline cursor-pointer">Ver todo</button>}</div>}
           {filtrados.map((p) => {
             const sel = p.id === selectedProjectId;
             const obra = ES_OBRA(p.estado);
@@ -466,11 +470,12 @@ export const ProjectsView: React.FC<Props> = (props) => {
             );
           })}
         </div>
+        )}
 
         {/* DETALLE */}
-        <div className="lg:col-span-7">
+        <div className={selected ? '' : 'lg:col-span-7'}>
           {!selected ? (
-            <div className="bg-white p-12 rounded-3xl border border-dashed border-slate-200 text-center space-y-3 text-slate-400"><FileCheck2 size={36} className="mx-auto text-slate-300" /><p className="font-bold text-sm text-slate-600">Selecciona {esPresupuestos ? 'un presupuesto' : 'una obra'} de la lista</p></div>
+            null
           ) : (() => {
             const p = selected;
             const c = clienteDe(p);
@@ -479,7 +484,8 @@ export const ProjectsView: React.FC<Props> = (props) => {
             const fact = facturasDe(p);
             const pendienteFacturar = p.presupuestoAceptado - p.totalFacturado;
             return (
-              <div className="bg-white rounded-3xl border border-slate-200/80 p-6 space-y-5 shadow-xs">
+              <div className="bg-white rounded-3xl border border-slate-200/80 p-6 md:p-8 space-y-5 shadow-xs">
+                <button type="button" onClick={() => onSelectProject(null)} className="text-xs font-bold text-slate-500 hover:text-slate-900 flex items-center gap-1.5 cursor-pointer -mt-1"><ArrowLeft size={15} /> Volver a {esPresupuestos ? 'los presupuestos' : 'las obras'}</button>
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-4 border-b border-slate-100">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap"><span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md">{p.codigo}{p.obraCodigo ? ` → ${p.obraCodigo}` : ''}</span>{badge(p.estado)}{p.firmaCliente && <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md border border-emerald-200 flex items-center gap-1"><Check size={10} /> Aceptado por {p.firmaCliente.firmadoPor} ({p.firmaCliente.dni})</span>}</div>
