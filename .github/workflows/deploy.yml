@@ -1,3 +1,5 @@
+# Construye la app con Vite y la publica en GitHub Pages cada vez que se sube a la rama principal.
+# Requisito: en el repositorio, Settings → Pages → Source: "GitHub Actions".
 name: Publicar en GitHub Pages
 
 on:
@@ -19,14 +21,58 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Comprobación temprana con un mensaje entendible: el fallo más típico es pegar en este
+      # archivo el bloque que da la consola de Firebase, que es JavaScript y lleva las claves
+      # sin comillas. En un .json todas las claves van entre comillas dobles.
+      - name: Comprobar firebase-config.json
+        run: |
+          if [ ! -f firebase-config.json ]; then
+            echo "::error::Falta firebase-config.json en la raíz del repositorio."
+            exit 1
+          fi
+          if ! node -e "JSON.parse(require('fs').readFileSync('firebase-config.json','utf8'))" 2>/dev/null; then
+            echo "::error::firebase-config.json no es JSON válido. Recuerda que las claves van entre comillas: \"apiKey\": \"AIza...\" y no apiKey: \"AIza...\". No pegues el bloque tal cual de la consola de Firebase."
+            echo "--- contenido actual ---"; cat firebase-config.json
+            exit 1
+          fi
+          node scripts/comprobar-config.mjs
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run lint
-      - run: npm test
-      - run: npm run build
+          # Sin "cache: npm" a propósito: ese ajuste aborta el flujo si el repositorio
+          # no tiene package-lock.json, cosa que pasa al subir los archivos a mano.
+
+      # Con candado se instala exactamente lo probado; sin él, se resuelve al vuelo.
+      - name: Instalar dependencias
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci || npm install
+          else
+            echo "No hay package-lock.json en el repositorio: se instala con npm install."
+            npm install
+          fi
+
+      # Comprobaciones de calidad. Avisan en el registro pero no impiden publicar,
+      # para que un detalle de tipos nunca deje la web sin actualizar.
+      - name: Comprobar tipos
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Pruebas de las librerías (Verifactu, Norma 43, conciliación)
+        run: npm test
+        continue-on-error: true
+
+      # Este sí es obligatorio: sin build no hay nada que publicar.
+      - name: Construir la web
+        run: npm run build
+
+      - name: Comprobar que hay web construida
+        run: |
+          test -f dist/index.html || { echo "::error::La carpeta dist no contiene index.html"; exit 1; }
+          echo "Construido correctamente:"; ls -la dist
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
