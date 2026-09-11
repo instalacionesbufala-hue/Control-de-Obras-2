@@ -355,7 +355,7 @@ function AppPrincipal() {
   const resumenEstado = (st: AppState) => {
     const n = (l?: unknown[]) => (l || []).length;
     const f = st.updatedAt ? new Date(st.updatedAt).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : 'sin fecha';
-    return `${n(st.clients)} clientes · ${n(st.projects)} presupuestos y obras · ${n(st.invoices)} facturas · ${n(st.expenses)} gastos · guardado el ${f}`;
+    return `${n(st.clients)} clientes · ${n(st.projects)} presupuestos y obras · ${n(st.invoices)} facturas · ${n(st.expenses)} gastos · ${n(st.catalogItems)} materiales · ${n(st.kits)} kits · guardado el ${f}`;
   };
 
   const irA = (tab: string) => {
