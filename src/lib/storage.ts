@@ -226,6 +226,17 @@ export function tieneDatosPropios(st: AppState | null): boolean {
   return propios(st.clients) || propios(st.projects) || propios(st.invoices) || propios(st.expenses) || propios(st.bankTransactions) || propios(st.calendarEvents);
 }
 
+// Última versión de la nube (su updatedAt) que ESTE dispositivo aplicó o subió. Va en una clave
+// aparte a propósito: si formara parte del estado, anotarla contaría como un cambio más y volvería
+// a disparar el guardado y la subida.
+const MARCA_NUBE_KEY = 'obracontrol-version-nube';
+export function leerMarcaNube(): string {
+  try { return localStorage.getItem(MARCA_NUBE_KEY) || ''; } catch { return ''; }
+}
+export function guardarMarcaNube(updatedAt: string) {
+  try { localStorage.setItem(MARCA_NUBE_KEY, updatedAt || ''); } catch { /* ignorar */ }
+}
+
 export function guardarCopiaAnterior(state: AppState) {
   try {
     localStorage.setItem(BACKUP_KEY, JSON.stringify(state));

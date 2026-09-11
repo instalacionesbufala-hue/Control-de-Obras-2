@@ -8,6 +8,7 @@ import { conCobro, sinCobro, totalCobrado, pendienteDe, situacionDe, estadoSegun
 import { consumoDesdePresupuesto, consumoActualizado, costeRealMateriales, costePrevistoMateriales, desviaciones, resumenObra } from '../src/lib/consumo';
 import { xmlDeFactura, xmlLote, desgloseDe, pendientesDeEnvio, avisosPrevios } from '../src/lib/verifactuXml';
 import { rellenarTexto, normalizarValidez } from '../src/lib/textos';
+import { decidirOrigen } from '../src/lib/sync';
 import type { AppState, Invoice, CompanySettings } from '../src/types';
 
 const pad = (s: string, n: number) => s.padEnd(n, ' ').substring(0, n);
@@ -278,4 +279,39 @@ console.log('detecta N43:', leerExtracto(n43, 'x.txt').formato, '· detecta CSV:
     ['es idempotente', normalizarValidez(normalizarValidez('Validez: 30 días')) === 'Validez: {validez} días'],
   ];
   for (const [nombre, ok] of pruebas) console.log('textos ·', nombre, ok ? 'OK' : 'MAL');
+}
+
+// ---- Quién manda al iniciar sesión ----
+// El caso que fallaba: el móvil se abría, eso guardaba en local con fecha nueva, y "ganaba" a la
+// nube aunque no tuviera los cambios del ordenador. Con la marca de versión (lo último que este
+// dispositivo aplicó o subió) se distingue "la nube cambió por otro lado" de "aquí hay cambios sin subir".
+{
+  const base = (extra: Partial<AppState>): AppState => ({
+    version: 4, updatedAt: '2026-09-10T10:00:00.000Z', companySettings: {} as any,
+    clients: [{ id: 'cli-1' }] as any, projects: [], invoices: [], expenses: [], bankTransactions: [], calendarEvents: [],
+    catalogCategories: [], catalogItems: [], suppliers: [], kits: [], demoCargada: false, guiaVista: true,
+    ...extra,
+  });
+  const UID = 'u1';
+  const V_ANTES = '2026-09-10T10:00:00.000Z'; // lo último que el móvil vio de la nube
+  const nube = base({ updatedAt: '2026-09-11T09:00:00.000Z' }); // el PC subió algo esta mañana
+  const casos: Array<[string, AppState | null, AppState | null, string, string]> = [
+    ['sin nube todavía: lo de aquí es el origen', base({}), null, '', 'local'],
+    ['el móvil no tocó nada desde la última nube que vio y la nube cambió: gana la nube',
+      base({ syncUid: UID, updatedAt: '2026-09-10T09:59:00.000Z' }), nube, V_ANTES, 'nube'],
+    ['la nube no se ha movido desde la última vez: lo de aquí vale',
+      base({ syncUid: UID, updatedAt: '2026-09-11T10:00:00.000Z' }), nube, nube.updatedAt, 'local'],
+    ['hay cambios aquí sin subir y la nube también cambió: se pregunta, nada automático',
+      base({ syncUid: UID, updatedAt: '2026-09-11T09:05:00.000Z' }), nube, V_ANTES, 'preguntar'],
+    ['dispositivo vinculado con versión antigua de la app (sin marca): la nube manda',
+      base({ syncUid: UID, updatedAt: '2026-09-11T10:00:00.000Z' }), nube, '', 'nube'],
+    ['dispositivo nuevo con solo ejemplos: la nube manda',
+      base({ clients: [{ id: 'cli-demo-1', esDemo: true }] as any }), nube, '', 'nube'],
+    ['dispositivo nuevo con datos propios y nube con datos: se pregunta', base({}), nube, '', 'preguntar'],
+    ['nube sin datos propios y aquí sí: lo de aquí', base({}), base({ clients: [] }), '', 'local'],
+  ];
+  for (const [nombre, local, remoto, marca, esperado] of casos) {
+    const r = decidirOrigen(local, remoto, UID, marca);
+    console.log('sincronización ·', nombre, r === esperado ? 'OK' : `MAL (devolvió ${r})`);
+  }
 }

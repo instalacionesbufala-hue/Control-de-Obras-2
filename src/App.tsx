@@ -17,7 +17,8 @@ import {
 
 import { auth, onAuthStateChanged, firebaseDisponible } from './lib/firebase';
 import { guardarEstadoEnNube, cargarEstadoDeNube, escucharEstadoNube } from './lib/cloudSync';
-import { diasSinCopiaLocal, cargarLocal, guardarLocal, guardarCopiaAnterior, tieneDatosPropios, DEFAULT_COMPANY_SETTINGS, migrarSettings, STATE_VERSION, deviceId } from './lib/storage';
+import { decidirOrigen, hayCambiosSinSubir } from './lib/sync';
+import { leerMarcaNube, guardarMarcaNube, diasSinCopiaLocal, cargarLocal, guardarLocal, guardarCopiaAnterior, tieneDatosPropios, DEFAULT_COMPANY_SETTINGS, migrarSettings, STATE_VERSION, deviceId } from './lib/storage';
 import { horasDeTecnico } from './lib/agenda';
 import { actualizarCosteEnKits, catalogoDemoSeparado } from './lib/catalogo';
 import { conCobro, sinCobro } from './lib/cobros';
@@ -174,45 +175,42 @@ function AppPrincipal() {
         return;
       }
       setEstadoNube('cargando');
-      setCompanySettings((prev) => ({
-        ...prev,
-        googleCalendarConectado: true,
-        googleAccountEmail: prev.googleAccountEmail || user.email || '',
-        email: prev.email || user.email || '',
-        nombreUsuario: prev.nombreUsuario || user.displayName || '',
-      }));
+      // Se lee lo local ANTES de tocar nada. Antes se marcaba aquí la cuenta como vinculada, eso
+      // guardaba en local con fecha nueva, y el dispositivo que se abría siempre "ganaba" a la nube
+      // y subía un estado viejo (así desaparecían la clave de Gemini y la URL del script).
+      const local = cargarLocal();
       try {
         const remoto = await cargarEstadoDeNube(user.uid);
-        const local = cargarLocal();
         setSyncUid(user.uid);
-        const nubeConDatos = tieneDatosPropios(remoto);
-        const localConDatos = tieneDatosPropios(local);
-        // Este dispositivo ya venía sincronizando con esta misma cuenta: manda la fecha, como siempre.
-        const yaVinculado = !!local?.syncUid && local.syncUid === user.uid;
         const traerNube = () => {
           guardarCopiaAnterior(local || estadoCompleto);
           ultimoRemotoAplicado.current = remoto!.updatedAt;
           aplicarEstado({ ...remoto!, syncUid: user.uid });
+          guardarMarcaNube(remoto!.updatedAt);
           setAviso({ texto: 'Datos cargados desde la nube (versión más reciente).', tipo: 'ok' });
         };
 
-        if (!remoto) {
-          // Primera vez con esta cuenta: lo que haya aquí pasa a ser el origen
-          pendienteSubida.current = true;
-        } else if (yaVinculado) {
-          if ((remoto.updatedAt || '') > (local!.updatedAt || '')) traerNube();
-          else pendienteSubida.current = true;
-        } else if (nubeConDatos && !localConDatos) {
-          // Dispositivo nuevo, aún con los ejemplos: la nube gana siempre, sin mirar fechas.
-          // Antes ganaba lo local por tener la fecha más reciente y borraba los datos de la cuenta.
+        const marca = leerMarcaNube();
+        const decision = decidirOrigen(local, remoto, user.uid, marca);
+        if (decision === 'nube') {
           traerNube();
-        } else if (nubeConDatos && localConDatos) {
-          // Hay trabajo real en los dos lados y este equipo no estaba vinculado: decide el usuario.
+        } else if (decision === 'preguntar') {
+          // Trabajo nuevo en los dos lados: decide el usuario, nada automático.
           guardarCopiaAnterior(local || estadoCompleto);
-          setConflictoInicial({ remoto, resumenNube: resumenEstado(remoto), resumenLocal: resumenEstado(local!) });
+          setConflictoInicial({ remoto: remoto!, resumenNube: resumenEstado(remoto!), resumenLocal: resumenEstado(local!) });
         } else {
-          pendienteSubida.current = true;
+          // Lo de aquí vale. Se sube solo si hay algo que la nube no tenga (o si la nube está vacía).
+          if (!remoto || !marca || hayCambiosSinSubir(local, marca)) pendienteSubida.current = true;
+          if (remoto) guardarMarcaNube(remoto.updatedAt);
         }
+        // Y ahora sí, la cuenta queda anotada como vinculada, encima del estado que haya ganado
+        setCompanySettings((prev) => ({
+          ...prev,
+          googleCalendarConectado: true,
+          googleAccountEmail: prev.googleAccountEmail || user.email || '',
+          email: prev.email || user.email || '',
+          nombreUsuario: prev.nombreUsuario || user.displayName || '',
+        }));
         setEstadoNube('sincronizado');
       } catch (e: any) {
         setEstadoNube('error');
@@ -233,6 +231,7 @@ function AppPrincipal() {
         ultimoRemotoAplicado.current = meta.updatedAt;
         guardarCopiaAnterior(estadoCompleto);
         aplicarEstado(st);
+        guardarMarcaNube(meta.updatedAt);
         setAviso({ texto: 'Otro dispositivo ha guardado cambios. Datos actualizados.', tipo: 'info' });
       },
       (e) => {
@@ -259,6 +258,7 @@ function AppPrincipal() {
         ultimoRemotoAplicado.current = st.updatedAt;
         await guardarEstadoEnNube(firebaseUser.uid, st);
         pendienteSubida.current = false;
+        guardarMarcaNube(st.updatedAt);
         setEstadoNube('sincronizado');
         setErrorNube(null);
       } catch (e: any) {
@@ -908,7 +908,7 @@ function AppPrincipal() {
                 <div className="p-3 rounded-2xl border border-slate-200 bg-slate-50"><p className="font-black text-slate-800">En este dispositivo</p><p className="text-slate-500 mt-0.5">{conflictoInicial.resumenLocal}</p></div>
               </div>
               <div className="flex flex-col sm:flex-row gap-2">
-                <button onClick={() => { const r = conflictoInicial.remoto; ultimoRemotoAplicado.current = r.updatedAt; aplicarEstado(r); setConflictoInicial(null); setAviso({ texto: 'Se han cargado los datos de la nube. La versión de este dispositivo queda como copia de seguridad.', tipo: 'ok' }); }} className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs cursor-pointer">Quedarme con los de la nube</button>
+                <button onClick={() => { const r = conflictoInicial.remoto; ultimoRemotoAplicado.current = r.updatedAt; aplicarEstado(r); guardarMarcaNube(r.updatedAt); setConflictoInicial(null); setAviso({ texto: 'Se han cargado los datos de la nube. La versión de este dispositivo queda como copia de seguridad.', tipo: 'ok' }); }} className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs cursor-pointer">Quedarme con los de la nube</button>
                 <button onClick={() => { pendienteSubida.current = true; setConflictoInicial(null); setAviso({ texto: 'Se conservan los datos de este dispositivo y se subirán a la nube.', tipo: 'info' }); }} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-bold text-xs cursor-pointer">Quedarme con los de este dispositivo</button>
               </div>
             </div>
